@@ -1,0 +1,29 @@
+# dependências
+node_modules/
+
+# build do frontend
+web/dist/
+*.tsbuildinfo
+
+# banco de dados local (SQLite + WAL/SHM)
+server/data/
+
+# logs e ambiente
+*.log
+.env
+.env.*
+
+# Claude Code (permissões e configuração local do usuário)
+.claude/
+
+# editores
+.vscode/
+.idea/
+
+# lixo de SO (projeto é multiplataforma)
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# artefatos de teste do executor
+.teste-exec/

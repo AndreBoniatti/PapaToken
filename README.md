@@ -1,0 +1,80 @@
+# 🟡 PacmanToken
+
+Aproveita os tokens ociosos das suas assinaturas de IA. Monitora as janelas de uso
+(5 horas + semanal) do **Claude Code** (Pro/Max) e do **Codex** (ChatGPT), mantém uma
+fila de tarefas e as executa automaticamente quando identifica que vai sobrar token —
+antes que a janela resete e o saldo se perca.
+
+## Como funciona
+
+- **Uso do Claude Code**: consulta o endpoint OAuth (não documentado) que alimenta o
+  `/usage` do próprio CLI, usando o login local de `~/.claude/.credentials.json`.
+  Retorna % da janela de 5h, % semanal e horários de reset. Cache de 180s (o endpoint
+  limita consultas frequentes).
+- **Uso do Codex**: lê os JSONL de sessão em `~/.codex/sessions/**` — cada interação
+  grava um evento `token_count` com `rate_limits` (primária = 5h, secundária = semanal).
+  O dado tem a idade da última interação com o Codex (marcado como "estimado" na UI).
+- **Execução**: `claude -p` (com `--permission-mode acceptEdits`) e
+  `codex exec -s workspace-write`, headless, no diretório de trabalho da tarefa.
+  O prompt vai por stdin. Concorrência de 1 tarefa por assinatura.
+- **Scheduler** (tick de 60s), por assinatura:
+  1. nunca despacha acima do **teto de segurança** (default 90%, janela 5h ou semanal);
+  2. exige **sobra mínima** até o teto (default 15%);
+  3. no modo `window` (default), só despacha quando faltar menos que a **janela de
+     despacho** (default 60 min) para o reset da 5h — token que ia sobrar de qualquer jeito;
+     no modo `aggressive`, despacha sempre que houver sobra; `paused` desliga tudo.
+  - Se o CLI acusar rate limit, a tarefa volta para a fila e o provider fica bloqueado 30 min.
+  - Falhas transitórias são re-tentadas até `max_attempts` (default 2).
+
+## Rodando
+
+```powershell
+npm install
+npm run build        # build do frontend (web/dist)
+npm run start        # servidor em http://127.0.0.1:3333
+```
+
+Desenvolvimento: `npm run dev` (server com watch) + `npm run dev:web` (Vite em :5173 com proxy).
+
+Iniciar junto com o sistema:
+- Windows: `powershell -ExecutionPolicy Bypass -File scripts\install-autostart.ps1`
+- Linux (systemd): `bash scripts/install-autostart.sh`
+
+## Pré-requisitos
+
+- Node.js 22.5+ (usa o SQLite nativo do Node — sem dependência compilada)
+- `@anthropic-ai/claude-code` instalado e logado (`claude` → login com a assinatura)
+- `@openai/codex` instalado e logado (`codex login`) — sem isso o card do Codex mostra
+  "sem dados" e tarefas designadas a ele ficam na fila
+- Windows e Linux são suportados (macOS deve funcionar pelo caminho POSIX, não testado)
+
+## Estrutura
+
+```
+server/src/
+  providers/claude.ts   uso via endpoint OAuth + execução claude -p
+  providers/codex.ts    uso via JSONL de sessões + execução codex exec
+  scheduler.ts          algoritmo de despacho (tick 60s)
+  executor.ts           spawn headless, timeout, rate-limit, retries
+  routes.ts             REST + SSE (/api/events)
+  db.ts                 SQLite (node:sqlite) — server/data/pacman.db
+web/src/pages/          Dashboard, Tarefas, Detalhe, Configurações
+```
+
+## Avisos
+
+- Os mecanismos de leitura de uso são **semi-oficiais** (endpoint não documentado /
+  formato interno dos logs) e podem quebrar com atualizações dos CLIs. A camada
+  `providers/` isola isso do resto do sistema.
+- Tarefas rodam de forma autônoma com permissão de escrita no diretório informado.
+  Prefira diretórios com **git** para revisar e reverter o que a IA fez.
+- Se o token OAuth do Claude expirar, abra o Claude Code uma vez para renovar
+  (o dashboard avisa).
+
+## Dicas de uso
+
+- Escreva prompts autossuficientes: contexto, critério de pronto e o que **não** fazer.
+- Use a prioridade para ordenar a fila; `any` deixa o scheduler usar a primeira
+  assinatura com sobra.
+- O teto de segurança existe para o seu uso manual nunca ser prejudicado — ajuste em
+  Configurações conforme sua rotina.
