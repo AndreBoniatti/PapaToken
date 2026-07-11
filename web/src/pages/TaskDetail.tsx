@@ -1,6 +1,40 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { api, onServerEvent, type Task } from "../api";
+
+/** <pre> do markdown com botão de copiar */
+function CodeBlock(props: React.ComponentProps<"pre">) {
+  const preRef = useRef<HTMLPreElement>(null);
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    const text = (preRef.current?.innerText ?? "").replace(/\n$/, "");
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // fallback para contextos sem clipboard API
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="code-block">
+      <button type="button" className={`copy-btn ${copied ? "copied" : ""}`} onClick={() => void copy()}>
+        {copied ? "✓ copiado" : "copiar"}
+      </button>
+      <pre ref={preRef} {...props} />
+    </div>
+  );
+}
 
 interface ClaudeEnvelope {
   type: string;
@@ -132,7 +166,11 @@ function LogView({ log }: { log: string }) {
               </span>
             )}
           </div>
-          <div className="result-box">{parsed.envelope.result ?? "(sem texto de resultado)"}</div>
+          <div className="result-box">
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ pre: CodeBlock }}>
+              {parsed.envelope.result ?? "*(sem texto de resultado)*"}
+            </ReactMarkdown>
+          </div>
         </>
       )}
 
