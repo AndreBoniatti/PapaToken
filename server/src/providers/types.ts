@@ -30,6 +30,17 @@ export interface TaskRow {
   model: string | null;
   /** nível de raciocínio; null = padrão do CLI */
   effort: string | null;
+  /** JSON array de nomes de arquivo salvos em <cwd>/anexos */
+  attachments: string;
+}
+
+export function parseAttachments(task: Pick<TaskRow, "attachments">): string[] {
+  try {
+    const arr = JSON.parse(task.attachments ?? "[]");
+    return Array.isArray(arr) ? arr.filter((x) => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 export interface Provider {

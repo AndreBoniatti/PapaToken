@@ -243,6 +243,62 @@ textarea { min-height: 90px; resize: vertical; }
 }
 .copy-btn:hover { opacity: 1; color: var(--text); }
 .copy-btn.copied { color: var(--ok); border-color: var(--ok); opacity: 1; }
+
+.attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 3px 10px;
+  font-size: 0.8rem;
+  margin: 0 6px 6px 0;
+}
+.attachment-chip button {
+  background: none;
+  border: none;
+  color: var(--muted);
+  padding: 0 2px;
+  font-size: 0.75rem;
+}
+.attachment-chip button:hover { color: var(--bad); }
+.attachment-add {
+  display: inline-block;
+  cursor: pointer;
+  color: var(--info);
+  font-size: 0.8rem;
+  padding: 3px 6px;
+}
+.attachment-add:hover { text-decoration: underline; }
+
+.attachment-name {
+  background: none;
+  border: none;
+  color: var(--text);
+  padding: 0;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.attachment-name:hover { color: var(--accent); border: none; }
+
+.preview-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  max-width: min(1100px, 92vw);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+.preview-modal img {
+  max-width: 100%;
+  max-height: calc(90vh - 70px);
+  object-fit: contain;
+  border-radius: 8px;
+  background: #0d0e13;
+}
 .result-box table {
   width: auto;
   margin: 0 0 10px;

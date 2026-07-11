@@ -51,7 +51,8 @@ db.exec(`
     attempts INTEGER NOT NULL DEFAULT 0,
     max_attempts INTEGER NOT NULL DEFAULT 2,
     model TEXT,
-    effort TEXT
+    effort TEXT,
+    attachments TEXT NOT NULL DEFAULT '[]'
   );
 
   CREATE TABLE IF NOT EXISTS settings (
@@ -60,10 +61,13 @@ db.exec(`
   );
 `);
 
-// migração para bancos criados antes das colunas model/effort
+// migração para bancos criados antes das colunas model/effort/attachments
 const taskCols = db.prepare("PRAGMA table_info(tasks)").all() as { name: string }[];
 if (!taskCols.some((c) => c.name === "model")) db.exec("ALTER TABLE tasks ADD COLUMN model TEXT");
 if (!taskCols.some((c) => c.name === "effort")) db.exec("ALTER TABLE tasks ADD COLUMN effort TEXT");
+if (!taskCols.some((c) => c.name === "attachments")) {
+  db.exec("ALTER TABLE tasks ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'");
+}
 
 const defaultSettings: Record<string, string> = {
   safety_ceiling_pct: "90",

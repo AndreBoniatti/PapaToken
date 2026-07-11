@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { api, onServerEvent, type Task } from "../api";
+import { api, onServerEvent, taskAttachments, type Task } from "../api";
 
 /** <pre> do markdown com botão de copiar */
 function CodeBlock(props: React.ComponentProps<"pre">) {
@@ -199,6 +199,7 @@ export default function TaskDetail() {
   const [task, setTask] = useState<Task | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [runProvider, setRunProvider] = useState<string>("");
+  const [preview, setPreview] = useState<string | null>(null);
 
   const load = useCallback(() => {
     if (!id) return;
@@ -251,6 +252,10 @@ export default function TaskDetail() {
     any: "Qualquer",
   };
 
+  const isImage = (name: string) => /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name);
+  const attachmentUrl = (name: string) =>
+    `/api/tasks/${task.id}/attachments/${encodeURIComponent(name)}`;
+
   return (
     <div className="task-detail">
       <p>
@@ -284,6 +289,61 @@ export default function TaskDetail() {
             <span className="meta-label">Diretório de trabalho</span>
             <span className="meta-value mono">{task.cwd}</span>
           </div>
+          <div className="meta-item meta-wide">
+            <span className="meta-label">Anexos</span>
+            <span className="meta-value">
+              {taskAttachments(task).length === 0 && <span className="muted">nenhum</span>}
+              {taskAttachments(task).map((name) => (
+                <span key={name} className="attachment-chip">
+                  <button
+                    type="button"
+                    className="attachment-name"
+                    title={isImage(name) ? "visualizar" : "abrir"}
+                    onClick={() =>
+                      isImage(name)
+                        ? setPreview(name)
+                        : window.open(attachmentUrl(name), "_blank")
+                    }
+                  >
+                    📎 {name}
+                  </button>
+                  {task.status !== "running" && (
+                    <button
+                      type="button"
+                      title="remover anexo"
+                      onClick={() => {
+                        void api
+                          .deleteAttachment(task.id, name)
+                          .then(() => load())
+                          .catch((e) => setError((e as Error).message));
+                      }}
+                    >
+                      ✕
+                    </button>
+                  )}
+                </span>
+              ))}
+              {task.status !== "running" && (
+                <label className="attachment-add">
+                  + anexar
+                  <input
+                    type="file"
+                    multiple
+                    style={{ display: "none" }}
+                    onChange={(e) => {
+                      const picked = Array.from(e.target.files ?? []);
+                      e.target.value = "";
+                      if (picked.length === 0) return;
+                      void api
+                        .uploadAttachments(task.id, picked)
+                        .then(() => load())
+                        .catch((err) => setError((err as Error).message));
+                    }}
+                  />
+                </label>
+              )}
+            </span>
+          </div>
         </div>
 
         <div className="toolbar mt">
@@ -310,6 +370,18 @@ export default function TaskDetail() {
         </div>
         {error && <p className="error-box mt">{error}</p>}
       </div>
+
+      {preview && (
+        <div className="modal-overlay" onClick={() => setPreview(null)}>
+          <div className="preview-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <strong>{preview}</strong>
+              <button onClick={() => setPreview(null)}>✕</button>
+            </div>
+            <img src={attachmentUrl(preview)} alt={preview} />
+          </div>
+        </div>
+      )}
 
       <div className="card mt">
         <h2>Prompt</h2>

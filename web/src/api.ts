@@ -45,6 +45,17 @@ export interface Task {
   max_attempts: number;
   model?: string | null;
   effort?: string | null;
+  /** JSON array (string) com os nomes dos arquivos em <cwd>/anexos */
+  attachments?: string;
+}
+
+export function taskAttachments(task: Pick<Task, "attachments">): string[] {
+  try {
+    const arr = JSON.parse(task.attachments ?? "[]");
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
 }
 
 export type Settings = Record<string, string>;
@@ -88,6 +99,21 @@ export const api = {
     request<{ ok: boolean }>(`/api/tasks/${id}/run`, {
       method: "POST",
       body: JSON.stringify(provider ? { provider } : {}),
+    }),
+  // multipart: sem Content-Type manual — o browser define o boundary
+  uploadAttachments: async (id: number, files: File[]): Promise<Task> => {
+    const fd = new FormData();
+    for (const f of files) fd.append("files", f, f.name);
+    const res = await fetch(`/api/tasks/${id}/attachments`, { method: "POST", body: fd });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error((body as { error?: string }).error ?? res.statusText);
+    }
+    return res.json() as Promise<Task>;
+  },
+  deleteAttachment: (id: number, name: string) =>
+    request<Task>(`/api/tasks/${id}/attachments/${encodeURIComponent(name)}`, {
+      method: "DELETE",
     }),
   settings: () => request<Settings>("/api/settings"),
   saveSettings: (s: Settings) =>

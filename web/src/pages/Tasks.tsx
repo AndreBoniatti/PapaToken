@@ -36,7 +36,18 @@ export default function Tasks() {
   const [showForm, setShowForm] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
   const [form, setForm] = useState({ ...emptyForm });
+  const [files, setFiles] = useState<File[]>([]);
+  const [filePreview, setFilePreview] = useState<{ name: string; url: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const openFilePreview = (f: File) => {
+    if (!f.type.startsWith("image/")) return;
+    setFilePreview({ name: f.name, url: URL.createObjectURL(f) });
+  };
+  const closeFilePreview = () => {
+    if (filePreview) URL.revokeObjectURL(filePreview.url);
+    setFilePreview(null);
+  };
 
   const load = useCallback(() => {
     api.tasks().then(setTasks).catch((e) => setError(e.message));
@@ -52,10 +63,38 @@ export default function Tasks() {
 
   const visible = filter === "all" ? tasks : tasks.filter((t) => t.status === filter);
 
+  const pasteImages = (e: React.ClipboardEvent) => {
+    const items = Array.from(e.clipboardData.items).filter((i) =>
+      i.type.startsWith("image/")
+    );
+    if (items.length === 0) return; // colagem de texto segue normal
+    e.preventDefault();
+    const stamp = new Date()
+      .toISOString()
+      .replace(/[:.]/g, "-")
+      .slice(0, 19);
+    const pasted = items
+      .map((item, idx) => {
+        const f = item.getAsFile();
+        if (!f) return null;
+        const ext = (f.type.split("/")[1] ?? "png").replace("jpeg", "jpg");
+        return new File([f], `print-${stamp}${idx > 0 ? `-${idx}` : ""}.${ext}`, {
+          type: f.type,
+        });
+      })
+      .filter((f): f is File => f !== null);
+    setFiles((prev) => [...prev, ...pasted]);
+  };
+
   const submit = async () => {
     try {
-      await api.createTask({ ...form, priority: Number(form.priority) } as Partial<Task>);
+      const created = await api.createTask({
+        ...form,
+        priority: Number(form.priority),
+      } as Partial<Task>);
+      if (files.length > 0) await api.uploadAttachments(created.id, files);
       setForm({ ...emptyForm });
+      setFiles([]);
       setShowForm(false);
       setError(null);
       load();
@@ -187,14 +226,64 @@ export default function Tasks() {
               <textarea
                 value={form.prompt}
                 onChange={(e) => setForm({ ...form, prompt: e.target.value })}
-                placeholder="Descreva a tarefa com contexto suficiente para execução autônoma…"
+                onPaste={pasteImages}
+                placeholder="Descreva a tarefa com contexto suficiente para execução autônoma… (Ctrl+V cola prints como anexo)"
               />
+            </div>
+            <div className="field full">
+              <label>Anexos (prints, documentos — opcional; prints podem ser colados com Ctrl+V no prompt)</label>
+              <input
+                type="file"
+                multiple
+                onChange={(e) => {
+                  // snapshot antes de limpar: a FileList é um objeto vivo e
+                  // zerar o input a esvaziaria antes do estado atualizar
+                  const picked = Array.from(e.target.files ?? []);
+                  e.target.value = "";
+                  setFiles((prev) => [...prev, ...picked]);
+                }}
+              />
+              {files.length > 0 && (
+                <div style={{ marginTop: 8 }}>
+                  {files.map((f, i) => (
+                    <span key={`${f.name}-${i}`} className="attachment-chip">
+                      <button
+                        type="button"
+                        className="attachment-name"
+                        title={f.type.startsWith("image/") ? "visualizar" : f.name}
+                        onClick={() => openFilePreview(f)}
+                      >
+                        📎 {f.name}
+                      </button>
+                      <button
+                        type="button"
+                        title="remover"
+                        onClick={() => setFiles(files.filter((_, j) => j !== i))}
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
           <div className="toolbar mt">
             <button className="primary" onClick={() => void submit()}>
               Criar tarefa
             </button>
+          </div>
+        </div>
+      )}
+
+      {filePreview && (
+        <div className="modal-overlay" onClick={closeFilePreview}>
+          <div className="preview-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <strong>{filePreview.name}</strong>
+              <button onClick={closeFilePreview}>✕</button>
+            </div>
+            <img src={filePreview.url} alt={filePreview.name} />
           </div>
         </div>
       )}

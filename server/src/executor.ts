@@ -3,7 +3,20 @@ import { mkdirSync } from "node:fs";
 import { db, getSettings } from "./db.js";
 import { emit } from "./events.js";
 import { getProvider } from "./providers/index.js";
+import { parseAttachments } from "./providers/types.js";
 import type { ProviderId, TaskRow } from "./providers/types.js";
+
+/** Prompt efetivo: anexos são apresentados ao modelo antes da instrução. */
+function buildPrompt(task: TaskRow): string {
+  const files = parseAttachments(task);
+  if (files.length === 0) return task.prompt;
+  return (
+    `[Anexos] O usuário anexou os seguintes arquivos na pasta "anexos" do diretório de trabalho:\n` +
+    files.map((f) => `- anexos/${f}`).join("\n") +
+    `\nLeia/analise esses arquivos conforme necessário antes de executar a tarefa.\n\n---\n\n` +
+    task.prompt
+  );
+}
 
 const MAX_LOG_BYTES = 2_000_000;
 
@@ -146,7 +159,7 @@ export async function runTask(taskId: number, forcedProvider?: ProviderId): Prom
       stderr += `\n[stdin error] ${err.message}`;
     });
 
-    child.stdin.write(task.prompt);
+    child.stdin.write(buildPrompt(task));
     child.stdin.end();
 
     child.on("close", (code) => {

@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -33,6 +34,9 @@ const webDist = join(here, "..", "..", "web", "dist");
 const app = Fastify({ logger: { level: "info" } });
 
 await app.register(cors, { origin: true });
+await app.register(multipart, {
+  limits: { fileSize: 25 * 1024 * 1024, files: 10 },
+});
 await registerRoutes(app);
 
 if (existsSync(webDist)) {

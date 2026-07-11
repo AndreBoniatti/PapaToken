@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { parseAttachments } from "./types.js";
 import type { Provider, TaskRow, UsageResult, UsageWindow } from "./types.js";
 
 const CODEX_HOME = process.env.CODEX_HOME ?? join(homedir(), ".codex");
@@ -147,6 +148,10 @@ export const codexProvider: Provider = {
     ];
     if (task.model) args.push("-m", task.model);
     if (task.effort) args.push("-c", `model_reasoning_effort=${task.effort}`);
+    // imagens anexadas entram no prompt inicial via -i (caminho relativo ao cwd)
+    for (const f of parseAttachments(task)) {
+      if (/\.(png|jpe?g|gif|webp|bmp)$/i.test(f)) args.push("-i", `"anexos/${f}"`);
+    }
     args.push("-");
     return { cmd: "codex", args };
   },

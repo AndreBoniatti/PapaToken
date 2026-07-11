@@ -1,11 +1,20 @@
 import type { FastifyInstance } from "fastify";
-import { existsSync, readdirSync } from "node:fs";
-import { dirname, join, resolve, sep } from "node:path";
+import {
+  createReadStream,
+  createWriteStream,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  unlinkSync,
+} from "node:fs";
+import { basename, dirname, extname, join, resolve, sep } from "node:path";
+import { pipeline } from "node:stream/promises";
 import { homedir } from "node:os";
 import { db, getSettings, setSetting } from "./db.js";
 import { bus } from "./events.js";
 import { blockedInfo, isRunning, runTask } from "./executor.js";
 import { evaluate, latestUsage, refreshUsage } from "./scheduler.js";
+import { parseAttachments } from "./providers/types.js";
 import type { ProviderId } from "./providers/types.js";
 
 const SETTING_KEYS = new Set([
@@ -209,6 +218,99 @@ export async function registerRoutes(app: FastifyInstance) {
       app.log.error(err, `falha ao executar tarefa ${task.id}`);
     });
     return { ok: true };
+  });
+
+  // ---- anexos ----
+  const sanitizeFilename = (name: string): string => {
+    const clean = basename(name).replace(/[^A-Za-z0-9À-ÿ ._()-]/g, "_").trim();
+    return (clean || "arquivo").slice(0, 80);
+  };
+
+  app.post("/api/tasks/:id/attachments", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as
+      | { cwd: string; status: string; attachments: string }
+      | undefined;
+    if (!task) return reply.code(404).send({ error: "não encontrada" });
+    if (task.status === "running") {
+      return reply.code(409).send({ error: "tarefa em execução não pode receber anexos" });
+    }
+    const dir = join(task.cwd, "anexos");
+    mkdirSync(dir, { recursive: true });
+
+    const names = parseAttachments(task);
+    for await (const part of req.files()) {
+      let name = sanitizeFilename(part.filename ?? "arquivo");
+      const ext = extname(name);
+      const stem = name.slice(0, name.length - ext.length);
+      let i = 1;
+      while (names.includes(name) || existsSync(join(dir, name))) {
+        name = `${stem}-${i++}${ext}`;
+      }
+      await pipeline(part.file, createWriteStream(join(dir, name)));
+      names.push(name);
+    }
+    db.prepare("UPDATE tasks SET attachments = ? WHERE id = ?").run(JSON.stringify(names), id);
+    return db.prepare("SELECT * FROM tasks WHERE id = ?").get(id);
+  });
+
+  const ATTACHMENT_MIME: Record<string, string> = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+    ".svg": "image/svg+xml",
+    ".pdf": "application/pdf",
+    ".txt": "text/plain; charset=utf-8",
+    ".md": "text/markdown; charset=utf-8",
+    ".json": "application/json",
+  };
+
+  app.get("/api/tasks/:id/attachments/:name", async (req, reply) => {
+    const { id, name } = req.params as { id: string; name: string };
+    const task = db.prepare("SELECT cwd, attachments FROM tasks WHERE id = ?").get(id) as
+      | { cwd: string; attachments: string }
+      | undefined;
+    if (!task) return reply.code(404).send({ error: "não encontrada" });
+    // só serve arquivos registrados na tarefa — nada de path traversal
+    if (!parseAttachments(task).includes(name)) {
+      return reply.code(404).send({ error: "anexo não encontrado" });
+    }
+    const path = join(task.cwd, "anexos", basename(name));
+    if (!existsSync(path)) {
+      return reply.code(404).send({ error: "arquivo não está mais no disco" });
+    }
+    reply.header(
+      "Content-Type",
+      ATTACHMENT_MIME[extname(name).toLowerCase()] ?? "application/octet-stream"
+    );
+    reply.header("Content-Disposition", `inline; filename="${encodeURIComponent(name)}"`);
+    return reply.send(createReadStream(path));
+  });
+
+  app.delete("/api/tasks/:id/attachments/:name", async (req, reply) => {
+    const { id, name } = req.params as { id: string; name: string };
+    const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as
+      | { cwd: string; status: string; attachments: string }
+      | undefined;
+    if (!task) return reply.code(404).send({ error: "não encontrada" });
+    if (task.status === "running") {
+      return reply.code(409).send({ error: "tarefa em execução não pode ser alterada" });
+    }
+    const names = parseAttachments(task);
+    if (!names.includes(name)) return reply.code(404).send({ error: "anexo não encontrado" });
+    try {
+      unlinkSync(join(task.cwd, "anexos", name));
+    } catch {
+      // arquivo já removido do disco — segue removendo do registro
+    }
+    db.prepare("UPDATE tasks SET attachments = ? WHERE id = ?").run(
+      JSON.stringify(names.filter((n) => n !== name)),
+      id
+    );
+    return db.prepare("SELECT * FROM tasks WHERE id = ?").get(id);
   });
 
   // ---- navegador de diretórios (app local, single-user) ----
