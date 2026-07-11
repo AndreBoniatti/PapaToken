@@ -1,4 +1,4 @@
-# 🟡 PacmanToken
+# 🟡 PapaToken
 
 Aproveita os tokens ociosos das suas assinaturas de IA. Monitora as janelas de uso
 (5 horas + semanal) do **Claude Code** (Pro/Max) e do **Codex** (ChatGPT), mantém uma
@@ -57,7 +57,7 @@ server/src/
   scheduler.ts          algoritmo de despacho (tick 60s)
   executor.ts           spawn headless, timeout, rate-limit, retries
   routes.ts             REST + SSE (/api/events)
-  db.ts                 SQLite (node:sqlite) — server/data/pacman.db
+  db.ts                 SQLite (node:sqlite) — server/data/papatoken.db
 web/src/pages/          Dashboard, Tarefas, Detalhe, Configurações
 ```
 

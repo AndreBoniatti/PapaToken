@@ -8,7 +8,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const dataDir = join(here, "..", "data");
 mkdirSync(dataDir, { recursive: true });
 
-export const db = new DatabaseSync(join(dataDir, "pacman.db"));
+export const db = new DatabaseSync(join(dataDir, "papatoken.db"));
 
 db.exec(`
   PRAGMA journal_mode = WAL;
@@ -76,7 +76,7 @@ const defaultSettings: Record<string, string> = {
   poll_interval_sec: "180",
   task_timeout_min: "30",
   mode: "window", // window | aggressive | paused
-  default_workspace_dir: join(homedir(), "Documents", "PacmanTasks"),
+  default_workspace_dir: join(homedir(), "Documents", "PapaTasks"),
   // acceptEdits: só edita arquivos; bypassPermissions: usa qualquer ferramenta
   // (web, comandos) sem aprovação — necessário para tarefas autônomas
   claude_permission_mode: "acceptEdits",

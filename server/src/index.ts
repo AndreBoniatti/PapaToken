@@ -53,4 +53,4 @@ if (existsSync(webDist)) {
 const PORT = Number(process.env.PORT ?? 3333);
 await app.listen({ port: PORT, host: "127.0.0.1" });
 startScheduler();
-console.log(`PacmanToken server em http://127.0.0.1:${PORT}`);
+console.log(`PapaToken server em http://127.0.0.1:${PORT}`);

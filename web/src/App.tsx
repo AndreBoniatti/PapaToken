@@ -8,7 +8,7 @@ export default function App() {
   return (
     <div className="layout">
       <aside className="sidebar">
-        <div className="logo">🟡 PacmanToken</div>
+        <div className="logo">🟡 PapaToken</div>
         <nav className="nav">
           <NavLink to="/" end>
             Dashboard
