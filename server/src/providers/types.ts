@@ -26,6 +26,10 @@ export interface TaskRow {
   status: string;
   attempts: number;
   max_attempts: number;
+  /** modelo específico (ex.: "haiku", "gpt-5.5-codex"); null = padrão do CLI */
+  model: string | null;
+  /** nível de raciocínio; null = padrão do CLI */
+  effort: string | null;
 }
 
 export interface Provider {

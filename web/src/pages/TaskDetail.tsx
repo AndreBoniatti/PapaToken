@@ -232,6 +232,8 @@ export default function TaskDetail() {
         <div className="meta-grid">
           <Meta label="IA designada">{providerName[task.provider] ?? task.provider}</Meta>
           <Meta label="Executada por">{task.executed_by ?? "—"}</Meta>
+          <Meta label="Modelo">{task.model ?? "padrão"}</Meta>
+          <Meta label="Effort">{task.effort ?? "padrão"}</Meta>
           <Meta label="Prioridade">{task.priority}</Meta>
           <Meta label="Tentativas">
             {task.attempts}/{task.max_attempts}

@@ -134,20 +134,20 @@ export const codexProvider: Provider = {
     }
   },
 
-  buildCommand(_task: TaskRow) {
+  buildCommand(task: TaskRow) {
     // Prompt via stdin ("-"); sandbox workspace-write = pode editar o cwd.
     // network_access permite buscas/downloads dentro do sandbox.
-    return {
-      cmd: "codex",
-      args: [
-        "exec",
-        "-s",
-        "workspace-write",
-        "-c",
-        "sandbox_workspace_write.network_access=true",
-        "--skip-git-repo-check",
-        "-",
-      ],
-    };
+    const args = [
+      "exec",
+      "-s",
+      "workspace-write",
+      "-c",
+      "sandbox_workspace_write.network_access=true",
+      "--skip-git-repo-check",
+    ];
+    if (task.model) args.push("-m", task.model);
+    if (task.effort) args.push("-c", `model_reasoning_effort=${task.effort}`);
+    args.push("-");
+    return { cmd: "codex", args };
   },
 };

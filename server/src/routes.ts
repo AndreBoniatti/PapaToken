@@ -19,6 +19,20 @@ const SETTING_KEYS = new Set([
   "claude_permission_mode",
 ]);
 
+// model/effort entram na linha de comando do CLI (shell) — só caracteres seguros
+const MODEL_RE = /^[A-Za-z0-9._-]{1,64}$/;
+const EFFORT_VALUES = new Set(["minimal", "low", "medium", "high", "xhigh", "max"]);
+
+function invalidModelEffort(model?: unknown, effort?: unknown): string | null {
+  if (model !== undefined && model !== null && model !== "" && !MODEL_RE.test(String(model))) {
+    return "model inválido — use apenas letras, números, ponto, hífen e underline";
+  }
+  if (effort !== undefined && effort !== null && effort !== "" && !EFFORT_VALUES.has(String(effort))) {
+    return "effort deve ser minimal | low | medium | high | xhigh | max";
+  }
+  return null;
+}
+
 function listDrives(): string[] {
   const drives: string[] = [];
   for (let c = 67; c <= 90; c++) {
@@ -98,18 +112,22 @@ export async function registerRoutes(app: FastifyInstance) {
       cwd?: string;
       priority?: number;
       max_attempts?: number;
+      model?: string;
+      effort?: string;
     };
     if (!body.title || !body.prompt) {
       return reply.code(400).send({ error: "title e prompt são obrigatórios" });
     }
+    const invalid = invalidModelEffort(body.model, body.effort);
+    if (invalid) return reply.code(400).send({ error: invalid });
     const provider: string = ["claude", "codex", "any"].includes(body.provider ?? "")
       ? (body.provider as string)
       : "any";
     const cwd = (body.cwd ?? "").trim();
     const result = db
       .prepare(
-        `INSERT INTO tasks (title, prompt, provider, cwd, priority, max_attempts)
-         VALUES (?, ?, ?, ?, ?, ?)`
+        `INSERT INTO tasks (title, prompt, provider, cwd, priority, max_attempts, model, effort)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         body.title,
@@ -117,7 +135,9 @@ export async function registerRoutes(app: FastifyInstance) {
         provider,
         cwd,
         body.priority ?? 0,
-        body.max_attempts ?? 2
+        body.max_attempts ?? 2,
+        body.model || null,
+        body.effort || null
       );
     const id = result.lastInsertRowid as number;
     if (!cwd) {
@@ -138,9 +158,14 @@ export async function registerRoutes(app: FastifyInstance) {
       return reply.code(409).send({ error: "tarefa em execução não pode ser editada" });
     }
     const body = req.body as Record<string, unknown>;
-    const allowed = ["title", "prompt", "provider", "cwd", "priority", "status", "max_attempts"];
+    const allowed = ["title", "prompt", "provider", "cwd", "priority", "status", "max_attempts", "model", "effort"];
     const updates = allowed.filter((k) => body[k] !== undefined);
     if (updates.length === 0) return reply.code(400).send({ error: "nada para atualizar" });
+    const invalid = invalidModelEffort(body.model, body.effort);
+    if (invalid) return reply.code(400).send({ error: invalid });
+    // "" no form significa "padrão do CLI" → null no banco
+    if (body.model === "") body.model = null;
+    if (body.effort === "") body.effort = null;
     if (body.status !== undefined && !["pending", "blocked", "done", "failed"].includes(String(body.status))) {
       return reply.code(400).send({ error: "status inválido" });
     }

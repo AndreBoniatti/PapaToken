@@ -123,15 +123,18 @@ export const claudeProvider: Provider = {
     }
   },
 
-  buildCommand(_task: TaskRow) {
+  buildCommand(task: TaskRow) {
     // Prompt is delivered via stdin (see executor) to avoid shell-quoting issues.
     const autonomous =
       getSettings().claude_permission_mode === "bypassPermissions";
-    return {
-      cmd: "claude",
-      args: autonomous
-        ? ["-p", "--output-format", "json", "--dangerously-skip-permissions"]
-        : ["-p", "--output-format", "json", "--permission-mode", "acceptEdits"],
-    };
+    const args = ["-p", "--output-format", "json"];
+    args.push(
+      ...(autonomous
+        ? ["--dangerously-skip-permissions"]
+        : ["--permission-mode", "acceptEdits"])
+    );
+    if (task.model) args.push("--model", task.model);
+    if (task.effort) args.push("--effort", task.effort);
+    return { cmd: "claude", args };
   },
 };

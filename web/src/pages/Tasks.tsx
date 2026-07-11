@@ -9,6 +9,25 @@ const emptyForm = {
   provider: "any",
   cwd: "",
   priority: 0,
+  model: "",
+  effort: "",
+};
+
+const MODEL_OPTIONS: Record<string, { value: string; label: string }[]> = {
+  claude: [
+    { value: "", label: "Padrão do CLI" },
+    { value: "fable", label: "Fable (mais capaz)" },
+    { value: "opus", label: "Opus" },
+    { value: "sonnet", label: "Sonnet" },
+    { value: "haiku", label: "Haiku (mais rápido/barato)" },
+  ],
+};
+
+const CODEX_MODEL_SUGGESTIONS = ["gpt-5.5-codex", "gpt-5.5"];
+
+const EFFORT_OPTIONS: Record<string, string[]> = {
+  claude: ["low", "medium", "high", "xhigh", "max"],
+  codex: ["minimal", "low", "medium", "high", "xhigh"],
 };
 
 export default function Tasks() {
@@ -93,7 +112,9 @@ export default function Tasks() {
               <label>IA designada</label>
               <select
                 value={form.provider}
-                onChange={(e) => setForm({ ...form, provider: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, provider: e.target.value, model: "", effort: "" })
+                }
               >
                 <option value="any">Qualquer</option>
                 <option value="claude">Claude Code</option>
@@ -107,6 +128,59 @@ export default function Tasks() {
                 value={form.priority}
                 onChange={(e) => setForm({ ...form, priority: Number(e.target.value) })}
               />
+            </div>
+            <div className="field">
+              <label>Modelo</label>
+              {form.provider === "claude" ? (
+                <select
+                  value={form.model}
+                  onChange={(e) => setForm({ ...form, model: e.target.value })}
+                >
+                  {MODEL_OPTIONS.claude.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              ) : form.provider === "codex" ? (
+                <>
+                  <input
+                    list="codex-models"
+                    value={form.model}
+                    onChange={(e) => setForm({ ...form, model: e.target.value })}
+                    placeholder="vazio = padrão do CLI"
+                  />
+                  <datalist id="codex-models">
+                    {CODEX_MODEL_SUGGESTIONS.map((m) => (
+                      <option key={m} value={m} />
+                    ))}
+                  </datalist>
+                </>
+              ) : (
+                <select disabled>
+                  <option>Padrão de cada IA</option>
+                </select>
+              )}
+            </div>
+            <div className="field">
+              <label>Effort (nível de raciocínio)</label>
+              {form.provider === "any" ? (
+                <select disabled>
+                  <option>Padrão de cada IA</option>
+                </select>
+              ) : (
+                <select
+                  value={form.effort}
+                  onChange={(e) => setForm({ ...form, effort: e.target.value })}
+                >
+                  <option value="">Padrão do CLI</option>
+                  {EFFORT_OPTIONS[form.provider].map((v) => (
+                    <option key={v} value={v}>
+                      {v}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
             <div className="field full">
               <label>Prompt (instrução completa para a IA)</label>

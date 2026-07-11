@@ -43,6 +43,8 @@ export interface Task {
   output_log?: string | null;
   attempts: number;
   max_attempts: number;
+  model?: string | null;
+  effort?: string | null;
 }
 
 export type Settings = Record<string, string>;
