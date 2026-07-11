@@ -1,12 +1,33 @@
 import { useEffect, useState } from "react";
 import { api, type Settings as SettingsMap } from "../api";
 
-const FIELDS: { key: string; label: string; hint: string; type: "number" | "select" | "text" }[] = [
+const FIELDS: {
+  key: string;
+  label: string;
+  hint: string;
+  type: "number" | "select" | "text";
+  options?: { value: string; label: string }[];
+}[] = [
   {
     key: "mode",
     label: "Modo do scheduler",
     hint: "window: executa perto do reset da janela; aggressive: executa sempre que houver sobra; paused: não executa nada automaticamente.",
     type: "select",
+    options: [
+      { value: "window", label: "window — perto do reset" },
+      { value: "aggressive", label: "aggressive — sempre que sobrar" },
+      { value: "paused", label: "paused — pausado" },
+    ],
+  },
+  {
+    key: "claude_permission_mode",
+    label: "Autonomia do Claude",
+    hint: "acceptEdits: só cria/edita arquivos — pedidos de web ou comandos ficam sem resposta; bypassPermissions: usa qualquer ferramenta (busca na web, comandos) sem aprovação. Para tarefas autônomas completas, use bypassPermissions — e prefira diretórios com git.",
+    type: "select",
+    options: [
+      { value: "bypassPermissions", label: "bypassPermissions — autonomia total" },
+      { value: "acceptEdits", label: "acceptEdits — só editar arquivos" },
+    ],
   },
   {
     key: "safety_ceiling_pct",
@@ -79,9 +100,11 @@ export default function Settings() {
                 value={values[f.key] ?? ""}
                 onChange={(e) => setValues({ ...values, [f.key]: e.target.value })}
               >
-                <option value="window">window — perto do reset</option>
-                <option value="aggressive">aggressive — sempre que sobrar</option>
-                <option value="paused">paused — pausado</option>
+                {f.options?.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
               </select>
             ) : (
               <input

@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { getSettings } from "../db.js";
 import type { Provider, TaskRow, UsageResult, UsageWindow } from "./types.js";
 
 const CREDENTIALS_PATH = join(homedir(), ".claude", ".credentials.json");
@@ -124,9 +125,13 @@ export const claudeProvider: Provider = {
 
   buildCommand(_task: TaskRow) {
     // Prompt is delivered via stdin (see executor) to avoid shell-quoting issues.
+    const autonomous =
+      getSettings().claude_permission_mode === "bypassPermissions";
     return {
       cmd: "claude",
-      args: ["-p", "--output-format", "json", "--permission-mode", "acceptEdits"],
+      args: autonomous
+        ? ["-p", "--output-format", "json", "--dangerously-skip-permissions"]
+        : ["-p", "--output-format", "json", "--permission-mode", "acceptEdits"],
     };
   },
 };

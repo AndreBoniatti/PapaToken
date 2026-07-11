@@ -16,6 +16,7 @@ const SETTING_KEYS = new Set([
   "task_timeout_min",
   "mode",
   "default_workspace_dir",
+  "claude_permission_mode",
 ]);
 
 function listDrives(): string[] {
@@ -219,6 +220,14 @@ export async function registerRoutes(app: FastifyInstance) {
       if (!SETTING_KEYS.has(k)) return reply.code(400).send({ error: `chave inválida: ${k}` });
       if (k === "mode" && !["window", "aggressive", "paused"].includes(v)) {
         return reply.code(400).send({ error: "mode deve ser window | aggressive | paused" });
+      }
+      if (
+        k === "claude_permission_mode" &&
+        !["acceptEdits", "bypassPermissions"].includes(v)
+      ) {
+        return reply
+          .code(400)
+          .send({ error: "claude_permission_mode deve ser acceptEdits | bypassPermissions" });
       }
       setSetting(k, String(v));
     }

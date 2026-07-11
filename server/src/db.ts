@@ -66,6 +66,9 @@ const defaultSettings: Record<string, string> = {
   task_timeout_min: "30",
   mode: "window", // window | aggressive | paused
   default_workspace_dir: join(homedir(), "Documents", "PacmanTasks"),
+  // acceptEdits: só edita arquivos; bypassPermissions: usa qualquer ferramenta
+  // (web, comandos) sem aprovação — necessário para tarefas autônomas
+  claude_permission_mode: "acceptEdits",
 };
 
 const insertSetting = db.prepare(
