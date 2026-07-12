@@ -99,6 +99,32 @@ describe("rotas de tarefas", () => {
     const res = await app.inject({ method: "GET", url: "/api/tasks/99999" });
     expect(res.statusCode).toBe(404);
   });
+
+  it("lista a fila na ordem real de despacho: prioridade e, no empate, a mais antiga", async () => {
+    const create = async (title: string, priority: number) =>
+      (
+        await app.inject({
+          method: "POST",
+          url: "/api/tasks",
+          payload: { title, prompt: "p", priority },
+        })
+      ).json();
+    const a = await create("fila-a", 0);
+    const b = await create("fila-b", 2);
+    const c = await create("fila-c", 0); // empata com a — criada depois, roda depois
+
+    const list = (await app.inject({ method: "GET", url: "/api/tasks" })).json() as {
+      id: number;
+      status: string;
+    }[];
+
+    const queue = list.map((t) => t.id).filter((id) => [a.id, b.id, c.id].includes(id));
+    expect(queue).toEqual([b.id, a.id, c.id]);
+
+    // concluídas/falhas aparecem depois de todas as pendentes
+    const statuses = list.map((t) => t.status);
+    expect(statuses.lastIndexOf("pending")).toBeLessThan(statuses.indexOf("done"));
+  });
 });
 
 describe("rotas de configurações", () => {

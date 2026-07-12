@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, onServerEvent, type Task } from "../api";
+import { api, onServerEvent, PRIORITY_OPTIONS, priorityLabel, type Task } from "../api";
 import DirectoryPicker from "../components/DirectoryPicker";
 
 const emptyForm = {
@@ -161,12 +161,17 @@ export default function Tasks() {
               </select>
             </div>
             <div className="field">
-              <label>Prioridade (maior = primeiro)</label>
-              <input
-                type="number"
+              <label>Prioridade (empate: mais antiga primeiro)</label>
+              <select
                 value={form.priority}
                 onChange={(e) => setForm({ ...form, priority: Number(e.target.value) })}
-              />
+              >
+                {PRIORITY_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="field">
               <label>Modelo</label>
@@ -321,7 +326,7 @@ export default function Tasks() {
                 </Link>
               </td>
               <td>{t.provider}</td>
-              <td>{t.priority}</td>
+              <td>{priorityLabel(t.priority)}</td>
               <td>
                 <span className={`status ${t.status}`}>{t.status}</span>
               </td>

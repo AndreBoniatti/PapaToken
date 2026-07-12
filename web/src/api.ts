@@ -49,6 +49,19 @@ export interface Task {
   attachments?: string;
 }
 
+/** Níveis de prioridade da UI — o banco guarda o inteiro, então valores
+ *  fora da lista (tarefas antigas) continuam válidos e aparecem como número. */
+export const PRIORITY_OPTIONS = [
+  { value: 2, label: "Urgente" },
+  { value: 1, label: "Alta" },
+  { value: 0, label: "Normal" },
+  { value: -1, label: "Baixa" },
+];
+
+export function priorityLabel(p: number): string {
+  return PRIORITY_OPTIONS.find((o) => o.value === p)?.label ?? String(p);
+}
+
 export function taskAttachments(task: Pick<Task, "attachments">): string[] {
   try {
     const arr = JSON.parse(task.attachments ?? "[]");

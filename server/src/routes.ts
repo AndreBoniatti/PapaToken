@@ -101,7 +101,12 @@ export async function registerRoutes(app: FastifyInstance) {
                 finished_at, executed_by, exit_code, attempts, max_attempts
          FROM tasks ORDER BY
            CASE status WHEN 'running' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END,
-           priority DESC, created_at DESC`
+           -- fila (running/pending): mesma ordem que o despacho usa (nextTask)
+           CASE WHEN status IN ('running','pending') THEN priority END DESC,
+           CASE WHEN status IN ('running','pending') THEN created_at END ASC,
+           -- histórico: mais recente primeiro
+           CASE WHEN status NOT IN ('running','pending') THEN COALESCE(finished_at, created_at) END DESC,
+           id ASC`
       )
       .all();
   });

@@ -88,7 +88,7 @@ web/src/pages/          Dashboard, Tarefas, Detalhe, Configurações
 ## Dicas de uso
 
 - Escreva prompts autossuficientes: contexto, critério de pronto e o que **não** fazer.
-- Use a prioridade para ordenar a fila; `any` deixa o scheduler usar a primeira
-  assinatura com sobra.
+- Use a prioridade para ordenar a fila (no empate, a mais antiga executa primeiro);
+  `any` deixa o scheduler usar a primeira assinatura com sobra.
 - O teto de segurança existe para o seu uso manual nunca ser prejudicado — ajuste em
   Configurações conforme sua rotina.

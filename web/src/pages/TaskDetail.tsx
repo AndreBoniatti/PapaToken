@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { api, onServerEvent, taskAttachments, type Task } from "../api";
+import { api, onServerEvent, priorityLabel, taskAttachments, type Task } from "../api";
 
 /** <pre> do markdown com botão de copiar */
 function CodeBlock(props: React.ComponentProps<"pre">) {
@@ -277,7 +277,7 @@ export default function TaskDetail() {
           <Meta label="Executada por">{task.executed_by ?? "—"}</Meta>
           <Meta label="Modelo">{task.model ?? "padrão"}</Meta>
           <Meta label="Effort">{task.effort ?? "padrão"}</Meta>
-          <Meta label="Prioridade">{task.priority}</Meta>
+          <Meta label="Prioridade">{priorityLabel(task.priority)}</Meta>
           <Meta label="Tentativas">
             {task.attempts}/{task.max_attempts}
           </Meta>

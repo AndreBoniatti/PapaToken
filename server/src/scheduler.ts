@@ -160,7 +160,7 @@ function nextTask(provider: ProviderId) {
     .prepare(
       `SELECT * FROM tasks
        WHERE status = 'pending' AND (provider = ? OR provider = 'any')
-       ORDER BY priority DESC, created_at ASC
+       ORDER BY priority DESC, created_at ASC, id ASC
        LIMIT 1`
     )
     .get(provider) as { id: number; title: string } | undefined;
