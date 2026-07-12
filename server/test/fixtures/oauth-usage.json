@@ -1,0 +1,27 @@
+{
+  "five_hour": { "utilization": 42, "resets_at": "2026-07-11T15:00:00Z" },
+  "seven_day": { "utilization": 13, "resets_at": "2026-07-15T00:00:00Z" },
+  "limits": [
+    {
+      "kind": "rate_limit",
+      "group": "session",
+      "percent": 42,
+      "resets_at": "2026-07-11T15:00:00Z",
+      "is_active": true
+    },
+    {
+      "kind": "rate_limit",
+      "group": "weekly",
+      "percent": 13,
+      "resets_at": "2026-07-15T00:00:00Z",
+      "is_active": true
+    },
+    {
+      "kind": "model_rate_limit",
+      "group": "weekly",
+      "percent": 27.5,
+      "resets_at": "2026-07-15T00:00:00Z",
+      "is_active": true
+    }
+  ]
+}

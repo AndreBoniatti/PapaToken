@@ -5,10 +5,11 @@ import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const dataDir = join(here, "..", "data");
-mkdirSync(dataDir, { recursive: true });
+// PAPATOKEN_DB aceita outro caminho ou ":memory:" (usado pelos testes)
+const dbPath = process.env.PAPATOKEN_DB ?? join(here, "..", "data", "papatoken.db");
+if (dbPath !== ":memory:") mkdirSync(dirname(dbPath), { recursive: true });
 
-export const db = new DatabaseSync(join(dataDir, "papatoken.db"));
+export const db = new DatabaseSync(dbPath);
 
 db.exec(`
   PRAGMA journal_mode = WAL;

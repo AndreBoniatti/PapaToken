@@ -88,10 +88,34 @@ export function evaluate(
   provider: ProviderId,
   settings: Record<string, string>
 ): { dispatch: boolean; reason: string } {
-  const usage = latestUsage.get(provider);
+  return decide(
+    {
+      usage: latestUsage.get(provider),
+      running: isRunning(provider),
+      blocked: isBlocked(provider),
+    },
+    settings
+  );
+}
+
+/** Estado que a decisão de despacho consome — injetável nos testes. */
+export interface DecisionInput {
+  usage: UsageResult | undefined;
+  running: boolean;
+  blocked: boolean;
+  /** epoch ms; padrão Date.now() */
+  now?: number;
+}
+
+export function decide(
+  input: DecisionInput,
+  settings: Record<string, string>
+): { dispatch: boolean; reason: string } {
+  const { usage } = input;
+  const now = input.now ?? Date.now();
   if (!usage || !usage.ok) return { dispatch: false, reason: "sem dados de uso" };
-  if (isRunning(provider)) return { dispatch: false, reason: "já executando" };
-  if (isBlocked(provider)) return { dispatch: false, reason: "bloqueado por rate limit" };
+  if (input.running) return { dispatch: false, reason: "já executando" };
+  if (input.blocked) return { dispatch: false, reason: "bloqueado por rate limit" };
 
   const ceiling = Number(settings.safety_ceiling_pct ?? "90");
   const minFree = Number(settings.min_free_pct ?? "15");
@@ -118,7 +142,7 @@ export function evaluate(
 
   // mode = window: only dispatch near the session-window reset
   if (!session.resetsAt) return { dispatch: false, reason: "reset da janela desconhecido" };
-  const minutesToReset = (new Date(session.resetsAt).getTime() - Date.now()) / 60_000;
+  const minutesToReset = (new Date(session.resetsAt).getTime() - now) / 60_000;
   if (minutesToReset <= windowMin) {
     return {
       dispatch: true,

@@ -1,0 +1,132 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { FastifyInstance } from "fastify";
+import { buildApp } from "../src/app.js";
+
+// O banco é :memory: (ver setup.ts) — cada arquivo de teste começa zerado.
+let app: FastifyInstance;
+beforeAll(async () => {
+  app = await buildApp();
+});
+afterAll(async () => {
+  await app.close();
+});
+
+describe("rotas de tarefas", () => {
+  it("exige title e prompt", async () => {
+    const res = await app.inject({ method: "POST", url: "/api/tasks", payload: {} });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("rejeita effort inválido", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: { title: "t", prompt: "p", effort: "turbo" },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("cria tarefa sem cwd e recebe pasta gerenciada própria", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: { title: "Organizar downloads", prompt: "faça x", provider: "claude" },
+    });
+    expect(res.statusCode).toBe(200);
+    const task = res.json();
+    expect(task.id).toBeTypeOf("number");
+    expect(task.status).toBe("pending");
+    expect(task.provider).toBe("claude");
+    expect(task.cwd).toContain(`tarefa-${task.id}`);
+
+    const list = await app.inject({ method: "GET", url: "/api/tasks" });
+    expect(list.json().some((t: { id: number }) => t.id === task.id)).toBe(true);
+  });
+
+  it("provider desconhecido vira 'any'; cwd informado é respeitado", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: { title: "t", prompt: "p", provider: "gemini", cwd: "C:\\tmp\\projeto" },
+    });
+    const task = res.json();
+    expect(task.provider).toBe("any");
+    expect(task.cwd).toBe("C:\\tmp\\projeto");
+  });
+
+  it("edita uma tarefa pendente e valida o status", async () => {
+    const created = (
+      await app.inject({
+        method: "POST",
+        url: "/api/tasks",
+        payload: { title: "original", prompt: "p" },
+      })
+    ).json();
+
+    const bad = await app.inject({
+      method: "PATCH",
+      url: `/api/tasks/${created.id}`,
+      payload: { status: "running" },
+    });
+    expect(bad.statusCode).toBe(400);
+
+    const ok = await app.inject({
+      method: "PATCH",
+      url: `/api/tasks/${created.id}`,
+      payload: { title: "renomeada", status: "done" },
+    });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toMatchObject({ title: "renomeada", status: "done" });
+  });
+
+  it("exclui tarefa e responde 404 depois", async () => {
+    const created = (
+      await app.inject({
+        method: "POST",
+        url: "/api/tasks",
+        payload: { title: "descartável", prompt: "p" },
+      })
+    ).json();
+
+    const del = await app.inject({ method: "DELETE", url: `/api/tasks/${created.id}` });
+    expect(del.json()).toEqual({ ok: true });
+
+    const gone = await app.inject({ method: "GET", url: `/api/tasks/${created.id}` });
+    expect(gone.statusCode).toBe(404);
+  });
+
+  it("responde 404 para tarefa inexistente", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/tasks/99999" });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+describe("rotas de configurações", () => {
+  it("entrega os padrões", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/settings" });
+    expect(res.json()).toMatchObject({ mode: "window", safety_ceiling_pct: "90" });
+  });
+
+  it("altera o modo e rejeita valores/chaves inválidos", async () => {
+    const ok = await app.inject({
+      method: "PATCH",
+      url: "/api/settings",
+      payload: { mode: "aggressive" },
+    });
+    expect(ok.json().mode).toBe("aggressive");
+
+    const badValue = await app.inject({
+      method: "PATCH",
+      url: "/api/settings",
+      payload: { mode: "yolo" },
+    });
+    expect(badValue.statusCode).toBe(400);
+
+    const badKey = await app.inject({
+      method: "PATCH",
+      url: "/api/settings",
+      payload: { hacker: "1" },
+    });
+    expect(badKey.statusCode).toBe(400);
+  });
+});

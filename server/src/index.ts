@@ -1,11 +1,8 @@
-import Fastify from "fastify";
-import cors from "@fastify/cors";
-import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { registerRoutes } from "./routes.js";
+import { buildApp } from "./app.js";
 import { startScheduler } from "./scheduler.js";
 import { db } from "./db.js";
 
@@ -31,13 +28,7 @@ if (Number(recovered.changes) > 0) {
 const here = dirname(fileURLToPath(import.meta.url));
 const webDist = join(here, "..", "..", "web", "dist");
 
-const app = Fastify({ logger: { level: "info" } });
-
-await app.register(cors, { origin: true });
-await app.register(multipart, {
-  limits: { fileSize: 25 * 1024 * 1024, files: 10 },
-});
-await registerRoutes(app);
+const app = await buildApp({ logger: true });
 
 if (existsSync(webDist)) {
   await app.register(fastifyStatic, { root: webDist });

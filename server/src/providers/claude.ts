@@ -30,7 +30,7 @@ function readCreds(): OAuthCreds | null {
  * that powers Claude Code's /usage. Verified against the live endpoint:
  * `limits` carries one entry per window with group "session" | "weekly".
  */
-interface OauthUsageResponse {
+export interface OauthUsageResponse {
   five_hour?: { utilization: number; resets_at: string | null } | null;
   limits?: {
     kind: string;
@@ -39,6 +39,33 @@ interface OauthUsageResponse {
     resets_at: string | null;
     is_active: boolean;
   }[];
+}
+
+export function parseUsageResponse(data: OauthUsageResponse): UsageResult {
+  const windows: UsageWindow[] = [];
+
+  const session = data.limits?.find((l) => l.group === "session");
+  if (session) {
+    windows.push({ id: "session", usedPercent: session.percent, resetsAt: session.resets_at });
+  } else if (data.five_hour) {
+    windows.push({
+      id: "session",
+      usedPercent: data.five_hour.utilization,
+      resetsAt: data.five_hour.resets_at,
+    });
+  }
+
+  // Weekly may appear as several scoped entries (per model) — take the worst.
+  const weeklies = (data.limits ?? []).filter((l) => l.group === "weekly");
+  if (weeklies.length > 0) {
+    const worst = weeklies.reduce((a, b) => (b.percent > a.percent ? b : a));
+    windows.push({ id: "weekly", usedPercent: worst.percent, resetsAt: worst.resets_at });
+  }
+
+  if (windows.length === 0) {
+    return { ok: false, windows: [], error: "Resposta do endpoint de uso sem janelas reconhecíveis (formato mudou?)." };
+  }
+  return { ok: true, windows };
 }
 
 let cache: { at: number; result: UsageResult } | null = null;
@@ -71,31 +98,7 @@ async function fetchUsage(): Promise<UsageResult> {
     return { ok: false, windows: [], error: `Endpoint de uso respondeu ${res.status}.` };
   }
 
-  const data = (await res.json()) as OauthUsageResponse;
-  const windows: UsageWindow[] = [];
-
-  const session = data.limits?.find((l) => l.group === "session");
-  if (session) {
-    windows.push({ id: "session", usedPercent: session.percent, resetsAt: session.resets_at });
-  } else if (data.five_hour) {
-    windows.push({
-      id: "session",
-      usedPercent: data.five_hour.utilization,
-      resetsAt: data.five_hour.resets_at,
-    });
-  }
-
-  // Weekly may appear as several scoped entries (per model) — take the worst.
-  const weeklies = (data.limits ?? []).filter((l) => l.group === "weekly");
-  if (weeklies.length > 0) {
-    const worst = weeklies.reduce((a, b) => (b.percent > a.percent ? b : a));
-    windows.push({ id: "weekly", usedPercent: worst.percent, resetsAt: worst.resets_at });
-  }
-
-  if (windows.length === 0) {
-    return { ok: false, windows: [], error: "Resposta do endpoint de uso sem janelas reconhecíveis (formato mudou?)." };
-  }
-  return { ok: true, windows };
+  return parseUsageResponse((await res.json()) as OauthUsageResponse);
 }
 
 export const claudeProvider: Provider = {

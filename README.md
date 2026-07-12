@@ -36,6 +36,20 @@ npm run start        # servidor em http://127.0.0.1:3333
 
 Desenvolvimento: `npm run dev` (server com watch) + `npm run dev:web` (Vite em :5173 com proxy).
 
+### Testes e verificação
+
+```powershell
+npm run check        # typecheck (server + web) e testes — rode antes de commitar
+npm test             # só os testes (Vitest, em server/test/)
+```
+
+Os testes cobrem os pontos mais sujeitos a regressão: os **parsers dos providers**
+(com fixtures reais em `server/test/fixtures/` — se o formato do endpoint OAuth ou dos
+JSONL do Codex mudar, atualize as fixtures junto), o **algoritmo de despacho**
+(`decide()` em `scheduler.ts`, função pura com relógio injetável) e as **rotas da API**
+(via `app.inject()` do Fastify). Rodam com banco em memória (`PAPATOKEN_DB=:memory:`)
+e não tocam rede, CLIs nem o banco real.
+
 Iniciar junto com o sistema:
 - Windows: `powershell -ExecutionPolicy Bypass -File scripts\install-autostart.ps1`
 - Linux (systemd): `bash scripts/install-autostart.sh`
