@@ -226,6 +226,15 @@ export default function TaskDetail() {
     }
   };
 
+  const review = async () => {
+    try {
+      await api.reviewTask(task.id);
+      setError(null);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
   const requeue = async () => {
     try {
       await api.updateTask(task.id, { status: "pending" } as Partial<Task>);
@@ -375,6 +384,14 @@ export default function TaskDetail() {
               <button className="primary" onClick={() => void run()}>
                 ▶ Executar agora
               </button>
+              {task.deliver_mode === "pr" && task.pr_url && (
+                <button
+                  onClick={() => void review()}
+                  title="lê os comentários novos do PR e re-executa a IA na branch dele"
+                >
+                  ⟲ Atender review
+                </button>
+              )}
               {task.status !== "pending" && (
                 <button onClick={() => void requeue()}>↩ Devolver à fila</button>
               )}

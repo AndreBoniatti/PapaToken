@@ -100,6 +100,23 @@ describe("rotas de tarefas", () => {
     expect(res.statusCode).toBe(404);
   });
 
+  it("recusa atender review de tarefa sem PR", async () => {
+    const created = (
+      await app.inject({
+        method: "POST",
+        url: "/api/tasks",
+        payload: { title: "sem pr", prompt: "p" },
+      })
+    ).json();
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/tasks/${created.id}/review`,
+      payload: {},
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toContain("não tem PR");
+  });
+
   it("valida os campos de entrega por PR", async () => {
     const semCwd = await app.inject({
       method: "POST",

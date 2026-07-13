@@ -191,6 +191,165 @@ export function buildPrBody(
   ].join("\n\n");
 }
 
+// ---------- ciclo de review de PR ----------
+
+export function parsePrUrl(
+  url: string
+): { owner: string; repo: string; number: number } | null {
+  const m = url.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
+  return m ? { owner: m[1], repo: m[2], number: Number(m[3]) } : null;
+}
+
+export interface ReviewComment {
+  author: string;
+  body: string;
+  /** arquivo/linha quando é comentário inline no diff */
+  path?: string;
+  line?: number;
+  createdAt: string;
+}
+
+interface PrViewJson {
+  state?: string;
+  headRefName?: string;
+  baseRefName?: string;
+  comments?: { author?: { login?: string }; body?: string; createdAt?: string }[];
+  reviews?: {
+    author?: { login?: string };
+    body?: string;
+    state?: string;
+    submittedAt?: string;
+  }[];
+  commits?: { committedDate?: string }[];
+}
+
+interface InlineCommentJson {
+  user?: { login?: string };
+  body?: string;
+  path?: string;
+  line?: number | null;
+  original_line?: number | null;
+  created_at?: string;
+}
+
+/**
+ * Junta comentários de conversa, corpos de review e comentários inline,
+ * mantendo apenas os posteriores ao último commit do PR (feedback ainda
+ * não atendido por um push).
+ */
+export function extractReviewComments(
+  pr: PrViewJson,
+  inline: InlineCommentJson[],
+  sinceIso: string | null
+): ReviewComment[] {
+  const out: ReviewComment[] = [];
+  for (const c of pr.comments ?? []) {
+    if (c.body?.trim()) {
+      out.push({ author: c.author?.login ?? "?", body: c.body, createdAt: c.createdAt ?? "" });
+    }
+  }
+  for (const r of pr.reviews ?? []) {
+    if (r.body?.trim()) {
+      out.push({ author: r.author?.login ?? "?", body: r.body, createdAt: r.submittedAt ?? "" });
+    }
+  }
+  for (const c of inline) {
+    if (c.body?.trim()) {
+      out.push({
+        author: c.user?.login ?? "?",
+        body: c.body,
+        path: c.path,
+        line: c.line ?? c.original_line ?? undefined,
+        createdAt: c.created_at ?? "",
+      });
+    }
+  }
+  const filtered = sinceIso ? out.filter((c) => c.createdAt > sinceIso) : out;
+  return filtered.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+export interface ReviewFeedback {
+  branch: string;
+  baseBranch: string;
+  comments: ReviewComment[];
+}
+
+/** Busca no GitHub o estado do PR e os comentários ainda não atendidos. */
+export async function fetchReviewFeedback(
+  repoPath: string,
+  prUrl: string
+): Promise<ReviewFeedback> {
+  const ref = parsePrUrl(prUrl);
+  if (!ref) throw new Error(`URL de PR não reconhecida: ${prUrl}`);
+
+  const view = await runGh(
+    [
+      "pr",
+      "view",
+      prUrl,
+      "--json",
+      "state,headRefName,baseRefName,comments,reviews,commits",
+    ],
+    repoPath
+  );
+  if (view.code !== 0) {
+    throw new Error(humanizeDeliveryError(`gh pr view: ${(view.stderr || view.stdout).trim()}`));
+  }
+  const pr = JSON.parse(view.stdout) as PrViewJson;
+  if (pr.state !== "OPEN") {
+    throw new Error(`o PR não está aberto (estado: ${pr.state ?? "desconhecido"})`);
+  }
+  if (!pr.headRefName) throw new Error("não foi possível identificar a branch do PR");
+
+  const inlineRes = await runGh(
+    ["api", `repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/comments`],
+    repoPath
+  );
+  const inline =
+    inlineRes.code === 0 ? (JSON.parse(inlineRes.stdout) as InlineCommentJson[]) : [];
+
+  const lastCommit =
+    (pr.commits ?? [])
+      .map((c) => c.committedDate ?? "")
+      .sort()
+      .at(-1) ?? null;
+
+  const comments = extractReviewComments(pr, inline, lastCommit);
+  if (comments.length === 0) {
+    throw new Error(
+      "nenhum comentário de review novo desde o último push — nada para atender"
+    );
+  }
+  return { branch: pr.headRefName, baseBranch: pr.baseRefName ?? "main", comments };
+}
+
+/**
+ * Worktree na branch existente do PR, resetada para o estado atual do remote
+ * (pode conter commits de outras pessoas desde o nosso push).
+ */
+export async function prepareReviewWorktree(opts: {
+  repoPath: string;
+  branch: string;
+  baseBranch: string;
+  worktreesDir: string;
+  taskId: number;
+}): Promise<PreparedWorktree> {
+  const { repoPath, branch } = opts;
+  await gitOk(["rev-parse", "--is-inside-work-tree"], repoPath);
+  await gitOk(["fetch", "origin", branch], repoPath);
+
+  mkdirSync(opts.worktreesDir, { recursive: true });
+  const worktreePath = join(opts.worktreesDir, `tarefa-${opts.taskId}`);
+  if (existsSync(worktreePath)) {
+    await git(["worktree", "remove", "--force", worktreePath], repoPath);
+    rmSync(worktreePath, { recursive: true, force: true });
+    await git(["worktree", "prune"], repoPath);
+  }
+  // -B: (re)aponta a branch local para o topo do remote
+  await gitOk(["worktree", "add", "-B", branch, worktreePath, `origin/${branch}`], repoPath);
+  return { repoPath, worktreePath, branch, baseBranch: opts.baseBranch };
+}
+
 // ---------- operações sobre o repositório ----------
 
 export interface PreparedWorktree {

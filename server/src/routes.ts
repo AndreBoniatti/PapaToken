@@ -12,7 +12,7 @@ import { pipeline } from "node:stream/promises";
 import { homedir } from "node:os";
 import { db, getSettings, setSetting } from "./db.js";
 import { bus } from "./events.js";
-import { blockedInfo, isRunning, runTask } from "./executor.js";
+import { blockedInfo, isRunning, runTask, startReview } from "./executor.js";
 import { gitDoctor, isValidBranchName, listRemoteBranches } from "./git.js";
 import { suggestVerifyCommands } from "./verify.js";
 import { evaluate, latestUsage, refreshUsage } from "./scheduler.js";
@@ -296,6 +296,18 @@ export async function registerRoutes(app: FastifyInstance) {
       app.log.error(err, `falha ao executar tarefa ${task.id}`);
     });
     return { ok: true };
+  });
+
+  app.post("/api/tasks/:id/review", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    try {
+      // valida e coleta os comentários de forma síncrona (erros viram resposta
+      // clara); a execução da IA continua em background
+      await startReview(Number(id));
+      return { ok: true };
+    } catch (err) {
+      return reply.code(409).send({ error: (err as Error).message });
+    }
   });
 
   // ---- anexos ----

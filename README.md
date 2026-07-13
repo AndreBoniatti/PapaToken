@@ -30,6 +30,10 @@ antes que a janela resete e o saldo se perca.
   devolvida à IA para **uma** rodada de correção e a verificação roda de novo;
   persistindo a falha, a tarefa é marcada como falha (sem PR). O formulário
   sugere comandos detectados no repositório e lembra o último usado por repo.
+- **Ciclo de review**: quando o PR de uma tarefa recebe comentários, o botão
+  "Atender review" (no detalhe da tarefa) lê os comentários novos — posteriores
+  ao último push — via `gh`, re-executa a IA na branch do PR em worktree própria
+  e o push atualiza o mesmo PR. O portão de qualidade também vale nessa rodada.
 - **Scheduler** (tick de 60s), por assinatura:
   1. nunca despacha acima do **teto de segurança** (default 90%, janela 5h ou semanal);
   2. exige **sobra mínima** até o teto (default 15%);

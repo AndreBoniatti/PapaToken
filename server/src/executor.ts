@@ -7,11 +7,13 @@ import {
   buildPrBody,
   deliverPullRequest,
   deliveryBlocker,
+  fetchReviewFeedback,
   isValidBranchName,
+  prepareReviewWorktree,
   prepareWorktree,
   renderBranchTemplate,
 } from "./git.js";
-import type { PreparedWorktree } from "./git.js";
+import type { PreparedWorktree, ReviewComment } from "./git.js";
 import { getProvider } from "./providers/index.js";
 import { parseAttachments } from "./providers/types.js";
 import type { ProviderId, TaskRow } from "./providers/types.js";
@@ -45,6 +47,27 @@ export function buildVerifyFeedbackPrompt(
     `[Verificação que falhou]\nComando: ${verifyCmd}\nSaída (final):\n${tail}\n\n` +
     `Corrija o que for necessário para a verificação passar. Não altere o comando de verificação ` +
     `nem enfraqueça testes existentes — a menos que estejam objetivamente errados.`
+  );
+}
+
+/** Prompt do atendimento de review: a IA volta à branch do PR com os comentários. */
+export function buildReviewPrompt(
+  task: Pick<TaskRow, "prompt">,
+  comments: ReviewComment[]
+): string {
+  const list = comments
+    .map(
+      (c) =>
+        `- @${c.author}${c.path ? ` (${c.path}${c.line ? `:${c.line}` : ""})` : ""}: ${c.body}`
+    )
+    .join("\n");
+  return (
+    `Você já executou a tarefa abaixo e o resultado está em um Pull Request aberto. ` +
+    `Um revisor humano deixou comentários que precisam ser atendidos.\n\n` +
+    `[Tarefa original]\n${task.prompt}\n\n` +
+    `[Comentários do review]\n${list}\n\n` +
+    `A branch do PR já está ativa neste diretório. Faça as alterações pedidas nos comentários — ` +
+    `elas serão commitadas e enviadas automaticamente ao mesmo PR. Não rode git commit/push você mesmo.`
   );
 }
 
@@ -181,19 +204,57 @@ export async function runTask(taskId: number, forcedProvider?: ProviderId): Prom
   ).run(providerId, taskId);
   emit({ type: "task", taskId, status: "running" });
 
-  const commandLine = [cmd, ...args].join(" ");
-  const first = await spawnProvider(commandLine, buildPrompt(task), execCwd, timeoutMs);
+  const result = await executeWithVerification(
+    task,
+    providerId,
+    [cmd, ...args].join(" "),
+    buildPrompt(task),
+    execCwd,
+    timeoutMs
+  );
+
+  const status = finishTask(task, providerId, result);
+  if (worktree) {
+    await deliver(task, providerId, worktree, status, result.stdout);
+  }
+}
+
+interface ExecResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  timedOut: boolean;
+  /** desfecho da última rodada da IA (sem considerar a verificação) */
+  succeeded: boolean;
+  verifyFailed: boolean;
+  verifyNotes: string[];
+}
+
+/**
+ * Executa a IA e aplica o portão de qualidade: verificação → uma rodada de
+ * correção com a saída do erro → re-verificação. Reutilizado pelo fluxo
+ * normal e pelo atendimento de review.
+ */
+async function executeWithVerification(
+  task: TaskRow,
+  providerId: ProviderId,
+  commandLine: string,
+  initialPrompt: string,
+  execCwd: string,
+  timeoutMs: number
+): Promise<ExecResult> {
+  const first = await spawnProvider(commandLine, initialPrompt, execCwd, timeoutMs);
 
   let stdout = first.stdout;
   let stderr = first.stderr;
   let exitCode = first.exitCode;
   let timedOut = first.timedOut;
+  let succeeded = runSucceeded(providerId, first);
 
-  // Portão de qualidade: verificação → uma rodada de correção → re-verificação
   const verifyNotes: string[] = [];
   let verifyFailed = false;
   const verifyCmd = task.verify_cmd?.trim();
-  if (verifyCmd && runSucceeded(providerId, first)) {
+  if (verifyCmd && succeeded) {
     const verifyTimeout = Math.min(timeoutMs, 10 * 60_000);
     let check = await runVerifyCommand(verifyCmd, execCwd, verifyTimeout);
     if (check.code === 0) {
@@ -218,8 +279,9 @@ export async function runTask(taskId: number, forcedProvider?: ProviderId): Prom
       }
       exitCode = second.exitCode;
       timedOut = timedOut || second.timedOut;
+      succeeded = runSucceeded(providerId, second);
 
-      if (runSucceeded(providerId, second)) {
+      if (succeeded) {
         check = await runVerifyCommand(verifyCmd, execCwd, verifyTimeout);
         if (check.code === 0) {
           verifyNotes.push("[verificação] passou após a rodada de correção");
@@ -239,13 +301,7 @@ export async function runTask(taskId: number, forcedProvider?: ProviderId): Prom
     }
   }
 
-  const status = finishTask(task, providerId, exitCode, stdout, stderr, timedOut, {
-    verifyFailed,
-    verifyNotes,
-  });
-  if (worktree) {
-    await deliver(task, providerId, worktree, status, stdout);
-  }
+  return { stdout, stderr, exitCode, timedOut, succeeded, verifyFailed, verifyNotes };
 }
 
 interface RunOutcome {
@@ -324,6 +380,94 @@ function runSucceeded(providerId: ProviderId, run: RunOutcome): boolean {
   return envelope ? envelope.is_error === false : run.exitCode === 0;
 }
 
+/**
+ * Ciclo de review: busca os comentários novos do PR, re-executa a IA na
+ * branch do PR e faz push (que atualiza o PR existente).
+ *
+ * Lança erro nas validações e na coleta (a rota devolve a mensagem ao
+ * usuário); a execução em si continua em background após o retorno.
+ */
+export async function startReview(taskId: number): Promise<void> {
+  const task = db
+    .prepare("SELECT * FROM tasks WHERE id = ?")
+    .get(taskId) as unknown as TaskRow | undefined;
+  if (!task) throw new Error(`Tarefa ${taskId} não existe`);
+  if (task.status === "running") throw new Error("tarefa já está em execução");
+  if (task.deliver_mode !== "pr" || !task.pr_url) {
+    throw new Error("a tarefa não tem PR aberto para atender");
+  }
+
+  const providerId: ProviderId = task.provider === "any" ? "claude" : task.provider;
+  const provider = getProvider(providerId);
+  if (!provider) throw new Error(`Provider desconhecido: ${providerId}`);
+  if (running.has(providerId)) {
+    throw new Error(`${providerId} já tem uma tarefa em execução`);
+  }
+
+  const settings = getSettings();
+  const timeoutMs = Number(settings.task_timeout_min ?? "30") * 60_000;
+
+  const feedback = await fetchReviewFeedback(task.cwd, task.pr_url);
+  const worktree = await prepareReviewWorktree({
+    repoPath: task.cwd,
+    branch: feedback.branch,
+    baseBranch: feedback.baseBranch,
+    worktreesDir: join(settings.default_workspace_dir, "worktrees"),
+    taskId: task.id,
+  });
+
+  running.set(providerId, taskId);
+  db.prepare(
+    "UPDATE tasks SET status = 'running', started_at = datetime('now'), executed_by = ?, attempts = attempts + 1, deliver_status = NULL WHERE id = ?"
+  ).run(providerId, taskId);
+  emit({ type: "task", taskId, status: "running" });
+  emit({
+    type: "scheduler",
+    message: `Tarefa #${task.id}: atendendo ${feedback.comments.length} comentário(s) do review na branch ${feedback.branch}`,
+  });
+
+  // a rota já pode responder — o restante roda em background
+  void (async () => {
+    const { cmd, args } = provider.buildCommand(task);
+    const result = await executeWithVerification(
+      task,
+      providerId,
+      [cmd, ...args].join(" "),
+      buildReviewPrompt(task, feedback.comments),
+      worktree.worktreePath,
+      timeoutMs
+    );
+    const status = finishReview(task, providerId, result);
+    await deliver(task, providerId, worktree, status, result.stdout);
+  })().catch((err) => {
+    running.delete(providerId);
+    appendLog(taskId, `[review] erro inesperado: ${(err as Error).message}`);
+    db.prepare("UPDATE tasks SET status = 'failed' WHERE id = ?").run(taskId);
+    emit({ type: "task", taskId, status: "failed" });
+  });
+}
+
+/** desfecho do atendimento de review — sempre ANEXA ao log (nunca sobrescreve) */
+function finishReview(
+  task: TaskRow,
+  providerId: ProviderId,
+  r: ExecResult
+): "done" | "failed" {
+  running.delete(providerId);
+  const status = r.succeeded && !r.timedOut && !r.verifyFailed ? "done" : "failed";
+
+  let section = `\n\n===== atendimento de review =====\n${r.stdout}`;
+  if (r.stderr.trim()) section += `\n[stderr]\n${r.stderr}`;
+  if (r.verifyNotes.length > 0) section += `\n${r.verifyNotes.join("\n")}`;
+  if (r.timedOut) section += "\n[executor] atendimento encerrado por timeout";
+
+  db.prepare(
+    "UPDATE tasks SET status = ?, finished_at = datetime('now'), exit_code = ?, output_log = COALESCE(output_log, '') || ? WHERE id = ?"
+  ).run(status, r.exitCode, section.slice(0, MAX_LOG_BYTES), task.id);
+  emit({ type: "task", taskId: task.id, status });
+  return status;
+}
+
 /** pós-execução da entrega por PR: commit/push/PR no sucesso, autópsia na falha */
 async function deliver(
   task: TaskRow,
@@ -368,43 +512,35 @@ function appendLog(taskId: number, text: string) {
 function finishTask(
   task: TaskRow,
   providerId: ProviderId,
-  exitCode: number | null,
-  stdout: string,
-  stderr: string,
-  timedOut: boolean,
-  verify?: { verifyFailed: boolean; verifyNotes: string[] }
+  r: ExecResult
 ): "done" | "failed" | "pending" {
   running.delete(providerId);
 
-  let log = stdout + (stderr.trim() ? `\n[stderr]\n${stderr}` : "");
-  if (verify && verify.verifyNotes.length > 0) {
-    log += `\n${verify.verifyNotes.join("\n")}`;
-  }
+  let log = r.stdout + (r.stderr.trim() ? `\n[stderr]\n${r.stderr}` : "");
+  if (r.verifyNotes.length > 0) log += `\n${r.verifyNotes.join("\n")}`;
   let status: "done" | "failed" | "pending";
 
-  const envelope = providerId === "claude" ? parseClaudeEnvelope(stdout) : null;
-  const succeeded = envelope ? envelope.is_error === false : exitCode === 0;
-
-  if (timedOut) {
+  if (r.timedOut) {
     status = "failed";
     log += "\n[executor] tarefa encerrada por timeout";
-  } else if (verify?.verifyFailed) {
+  } else if (r.verifyFailed) {
     // verificação reprovada mesmo após a rodada de correção — sem nova
     // tentativa automática (repetir a tarefa inteira só queimaria tokens)
     status = "failed";
-  } else if (succeeded) {
+  } else if (r.succeeded) {
     status = "done";
   } else {
     // Only failures are checked for rate-limit markers — a successful run may
     // legitimately mention "rate limit" in its result text.
-    const failureText = `${envelope?.result ?? ""}\n${stderr}\n${stdout.slice(-2000)}`;
+    const envelope = providerId === "claude" ? parseClaudeEnvelope(r.stdout) : null;
+    const failureText = `${envelope?.result ?? ""}\n${r.stderr}\n${r.stdout.slice(-2000)}`;
     if (looksRateLimited(failureText)) {
       status = "pending";
       blockedUntil.set(providerId, Date.now() + 30 * 60_000);
       log += "\n[executor] rate limit detectado — tarefa devolvida à fila, provider bloqueado por 30 min";
     } else if (task.attempts + 1 < task.max_attempts) {
       status = "pending";
-      log += `\n[executor] falha (exit ${exitCode}) — nova tentativa será feita (${task.attempts + 1}/${task.max_attempts})`;
+      log += `\n[executor] falha (exit ${r.exitCode}) — nova tentativa será feita (${task.attempts + 1}/${task.max_attempts})`;
     } else {
       status = "failed";
     }
@@ -412,7 +548,7 @@ function finishTask(
 
   db.prepare(
     `UPDATE tasks SET status = ?, finished_at = datetime('now'), exit_code = ?, output_log = ? WHERE id = ?`
-  ).run(status, exitCode, log.slice(0, MAX_LOG_BYTES), task.id);
+  ).run(status, r.exitCode, log.slice(0, MAX_LOG_BYTES), task.id);
   emit({ type: "task", taskId: task.id, status });
   return status;
 }
