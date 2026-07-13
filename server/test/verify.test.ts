@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { runVerifyCommand, suggestVerifyCommands } from "../src/verify.js";
-import { buildVerifyFeedbackPrompt } from "../src/executor.js";
+import { buildVerifyFeedbackPrompt, cliOnPath, setupMessage } from "../src/executor.js";
 
 const fixture = (name: string) =>
   fileURLToPath(new URL(`./fixtures/suggest/${name}`, import.meta.url));
@@ -36,6 +36,25 @@ describe("runVerifyCommand", () => {
     );
     expect(r.code).toBe(3);
     expect(r.output).toContain("falhou");
+  });
+});
+
+describe("pre-flight de provider (setup)", () => {
+  it("mensagem de CLI ausente traz instalação, login e reinício do servidor", () => {
+    const msg = setupMessage("claude", "cli");
+    expect(msg).toContain("npm install -g @anthropic-ai/claude-code");
+    expect(msg).toContain("Reinicie o servidor");
+    expect(setupMessage("codex", "cli")).toContain("npm install -g @openai/codex");
+  });
+
+  it("mensagem de login orienta o comando certo por provider", () => {
+    expect(setupMessage("claude", "login")).toContain('"claude"');
+    expect(setupMessage("codex", "login")).toContain("codex login");
+  });
+
+  it("cliOnPath detecta comandos existentes e inexistentes", async () => {
+    expect(await cliOnPath("node")).toBe(true);
+    expect(await cliOnPath("comando-que-nao-existe-xyz")).toBe(false);
   });
 });
 

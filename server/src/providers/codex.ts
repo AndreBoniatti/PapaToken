@@ -82,7 +82,8 @@ function readUsageFromSessions(): UsageResult {
     return {
       ok: false,
       windows: [],
-      error: "Sem sessões do Codex nesta máquina — rode o Codex uma vez para gerar dados de uso.",
+      error:
+        "Sem dados de uso do Codex nesta máquina. Instale (npm install -g @openai/codex), rode \"codex login\" e use o Codex uma vez — o uso é lido das sessões locais.",
     };
   }
   for (const file of files) {

@@ -19,8 +19,11 @@ export function runVerifyCommand(
   cwd: string,
   timeoutMs: number
 ): Promise<VerifyResult> {
+  // chcp 65001: mensagens do próprio cmd.exe saem em UTF-8 (sem "n�o")
+  const effectiveCmd =
+    process.platform === "win32" ? `chcp 65001>nul & ${cmdLine}` : cmdLine;
   return new Promise((resolve) => {
-    const child = spawn(cmdLine, {
+    const child = spawn(effectiveCmd, {
       cwd,
       shell: true,
       stdio: ["ignore", "pipe", "pipe"],

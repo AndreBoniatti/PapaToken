@@ -73,7 +73,12 @@ let cache: { at: number; result: UsageResult } | null = null;
 async function fetchUsage(): Promise<UsageResult> {
   const creds = readCreds();
   if (!creds) {
-    return { ok: false, windows: [], error: "Credenciais do Claude Code não encontradas — faça login no Claude Code." };
+    return {
+      ok: false,
+      windows: [],
+      error:
+        "Claude Code não configurado nesta máquina. Instale (npm install -g @anthropic-ai/claude-code) e rode \"claude\" no terminal para fazer login com sua assinatura Pro/Max.",
+    };
   }
   if (creds.expiresAt && creds.expiresAt < Date.now()) {
     return { ok: false, windows: [], error: "Token OAuth expirado — abra o Claude Code para renovar." };

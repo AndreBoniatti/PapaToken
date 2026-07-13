@@ -77,14 +77,14 @@ function parseLog(log: string): ParsedLog {
   const notes: string[] = [];
   const contentLines: string[] = [];
   for (const line of body.split("\n")) {
-    if (/^\[(executor|recovery)\]/.test(line.trim())) notes.push(line.trim());
+    if (/^\[(executor|recovery|setup)\]/.test(line.trim())) notes.push(line.trim());
     else contentLines.push(line);
   }
   // notes appended to stderr section also count
   if (stderr) {
     const kept: string[] = [];
     for (const line of stderr.split("\n")) {
-      if (/^\[(executor|recovery)\]/.test(line.trim())) notes.push(line.trim());
+      if (/^\[(executor|recovery|setup)\]/.test(line.trim())) notes.push(line.trim());
       else kept.push(line);
     }
     stderr = kept.join("\n").trim() || null;
@@ -144,7 +144,7 @@ function LogView({ log }: { log: string }) {
         <div className="notices">
           {parsed.notes.map((n, i) => (
             <div key={i} className="notice">
-              ⚠ {n.replace(/^\[(executor|recovery)\]\s*/, "")}
+              ⚠ {n.replace(/^\[(executor|recovery|setup)\]\s*/, "")}
             </div>
           ))}
         </div>

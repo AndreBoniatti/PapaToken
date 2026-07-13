@@ -13,10 +13,11 @@ import {
   prepareWorktree,
   renderBranchTemplate,
 } from "./git.js";
+import { run } from "./git.js";
 import type { PreparedWorktree, ReviewComment } from "./git.js";
 import { getProvider } from "./providers/index.js";
 import { parseAttachments } from "./providers/types.js";
-import type { ProviderId, TaskRow } from "./providers/types.js";
+import type { Provider, ProviderId, TaskRow } from "./providers/types.js";
 import { runVerifyCommand } from "./verify.js";
 
 /** Prompt efetivo: anexos são apresentados ao modelo antes da instrução. */
@@ -48,6 +49,56 @@ export function buildVerifyFeedbackPrompt(
     `Corrija o que for necessário para a verificação passar. Não altere o comando de verificação ` +
     `nem enfraqueça testes existentes — a menos que estejam objetivamente errados.`
   );
+}
+
+const PROVIDER_SETUP: Record<ProviderId, { name: string; install: string; login: string }> = {
+  claude: {
+    name: "Claude Code",
+    install: "npm install -g @anthropic-ai/claude-code",
+    login: 'rode "claude" no terminal e faça login com sua assinatura (Pro/Max)',
+  },
+  codex: {
+    name: "Codex",
+    install: "npm install -g @openai/codex",
+    login: 'rode "codex login" no terminal (assinatura ChatGPT)',
+  },
+};
+
+/** mensagem de setup pronta para o log da tarefa (linhas [setup] viram avisos na UI) */
+export function setupMessage(providerId: ProviderId, missing: "cli" | "login"): string {
+  const s = PROVIDER_SETUP[providerId];
+  if (missing === "cli") {
+    return [
+      `[setup] ${s.name} (comando "${providerId}") não está instalado ou não está no PATH deste servidor.`,
+      `[setup] 1. Instale: ${s.install}`,
+      `[setup] 2. Faça login: ${s.login}`,
+      `[setup] 3. Reinicie o servidor do PapaToken (para ele enxergar o PATH atualizado) e devolva a tarefa à fila.`,
+    ].join("\n");
+  }
+  return [
+    `[setup] ${s.name} está instalado, mas sem login nesta máquina.`,
+    `[setup] ${s.login} e devolva a tarefa à fila.`,
+  ].join("\n");
+}
+
+/** o comando existe no PATH deste processo? (where/which — rápido e sem rede) */
+export async function cliOnPath(cmd: string): Promise<boolean> {
+  const probe = process.platform === "win32" ? "where" : "which";
+  const r = await run(probe, [cmd], process.cwd());
+  return r.code === 0;
+}
+
+/**
+ * Pre-flight do provider: CLI instalado e logado? Falha em ~1s com passos de
+ * setup no log, ANTES de tentar executar (e de o shell cuspir erro críptico).
+ */
+export async function providerBlocker(
+  providerId: ProviderId,
+  provider: Provider
+): Promise<string | null> {
+  if (!(await cliOnPath(providerId))) return setupMessage(providerId, "cli");
+  if (!(await provider.isAvailable())) return setupMessage(providerId, "login");
+  return null;
 }
 
 /** Prompt do atendimento de review: a IA volta à branch do PR com os comentários. */
@@ -186,6 +237,16 @@ export async function runTask(taskId: number, forcedProvider?: ProviderId): Prom
   if (!provider) throw new Error(`Provider desconhecido: ${providerId}`);
   if (running.has(providerId)) {
     throw new Error(`Provider ${providerId} já tem uma tarefa em execução`);
+  }
+
+  const setupIssue = await providerBlocker(providerId, provider);
+  if (setupIssue) {
+    db.prepare("UPDATE tasks SET status = 'failed', output_log = ? WHERE id = ?").run(
+      setupIssue,
+      taskId
+    );
+    emit({ type: "task", taskId, status: "failed" });
+    return;
   }
 
   const settings = getSettings();
@@ -377,6 +438,8 @@ function spawnProvider(
   timeoutMs: number
 ): Promise<RunOutcome> {
   const isWindows = process.platform === "win32";
+  // chcp 65001: mensagens do próprio cmd.exe saem em UTF-8 (sem "n�o")
+  if (isWindows) commandLine = `chcp 65001>nul & ${commandLine}`;
   return new Promise((resolve) => {
     // shell:true is required on Windows for npm .cmd shims; the command line is
     // built only from static strings — the prompt travels via stdin, never
@@ -462,6 +525,9 @@ export async function startReview(taskId: number): Promise<void> {
   if (running.has(providerId)) {
     throw new Error(`${providerId} já tem uma tarefa em execução`);
   }
+
+  const setupIssue = await providerBlocker(providerId, provider);
+  if (setupIssue) throw new Error(setupIssue.replaceAll("[setup] ", ""));
 
   const settings = getSettings();
   const timeoutMs = Number(settings.task_timeout_min ?? "30") * 60_000;
