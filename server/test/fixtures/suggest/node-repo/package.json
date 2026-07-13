@@ -1,0 +1,8 @@
+{
+  "name": "node-repo-fixture",
+  "scripts": {
+    "check": "tsc --noEmit && vitest run",
+    "test": "vitest run",
+    "lint": "eslint ."
+  }
+}

@@ -14,6 +14,7 @@ import { db, getSettings, setSetting } from "./db.js";
 import { bus } from "./events.js";
 import { blockedInfo, isRunning, runTask } from "./executor.js";
 import { gitDoctor, isValidBranchName, listRemoteBranches } from "./git.js";
+import { suggestVerifyCommands } from "./verify.js";
 import { evaluate, latestUsage, refreshUsage } from "./scheduler.js";
 import { parseAttachments } from "./providers/types.js";
 import type { ProviderId } from "./providers/types.js";
@@ -42,6 +43,25 @@ function invalidModelEffort(model?: unknown, effort?: unknown): string | null {
     return "effort deve ser minimal | low | medium | high | xhigh | max";
   }
   return null;
+}
+
+function invalidVerifyCmd(v: unknown): string | null {
+  if (v === undefined || v === null || v === "") return null;
+  const s = String(v);
+  if (s.length > 200) return "verify_cmd muito longo (máx. 200 caracteres)";
+  if (/[\r\n]/.test(s)) return "verify_cmd deve ser uma única linha";
+  return null;
+}
+
+/** memoriza o comando de verificação por repositório (só para cwd escolhido
+ *  pelo usuário — pastas gerenciadas tarefa-<id> não são repositórios dele) */
+function rememberVerifyCmd(cwd: string | null | undefined, verifyCmd: string | null) {
+  if (!cwd || !verifyCmd) return;
+  const managedBase = getSettings().default_workspace_dir;
+  if (managedBase && cwd.startsWith(managedBase)) return;
+  db.prepare(
+    "INSERT INTO repo_prefs (cwd, verify_cmd) VALUES (?, ?) ON CONFLICT(cwd) DO UPDATE SET verify_cmd = excluded.verify_cmd"
+  ).run(cwd, verifyCmd);
 }
 
 function invalidDelivery(body: Record<string, unknown>): string | null {
@@ -150,13 +170,15 @@ export async function registerRoutes(app: FastifyInstance) {
       deliver_mode?: string;
       base_branch?: string;
       work_branch?: string;
+      verify_cmd?: string;
     };
     if (!body.title || !body.prompt) {
       return reply.code(400).send({ error: "title e prompt são obrigatórios" });
     }
     const invalid =
       invalidModelEffort(body.model, body.effort) ??
-      invalidDelivery(body as Record<string, unknown>);
+      invalidDelivery(body as Record<string, unknown>) ??
+      invalidVerifyCmd(body.verify_cmd);
     if (invalid) return reply.code(400).send({ error: invalid });
     const provider: string = ["claude", "codex", "any"].includes(body.provider ?? "")
       ? (body.provider as string)
@@ -168,11 +190,12 @@ export async function registerRoutes(app: FastifyInstance) {
         .code(400)
         .send({ error: "entrega por PR exige diretório de trabalho (repositório git)" });
     }
+    const verifyCmd = body.verify_cmd?.trim() || null;
     const result = db
       .prepare(
         `INSERT INTO tasks (title, prompt, provider, cwd, priority, max_attempts, model, effort,
-                            deliver_mode, base_branch, work_branch)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                            deliver_mode, base_branch, work_branch, verify_cmd)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         body.title,
@@ -185,8 +208,10 @@ export async function registerRoutes(app: FastifyInstance) {
         body.effort || null,
         deliverMode,
         body.base_branch?.trim() || null,
-        body.work_branch?.trim() || null
+        body.work_branch?.trim() || null,
+        verifyCmd
       );
+    rememberVerifyCmd(cwd, verifyCmd);
     const id = result.lastInsertRowid as number;
     if (!cwd) {
       // sem diretório informado → pasta gerenciada própria da tarefa
@@ -208,24 +233,32 @@ export async function registerRoutes(app: FastifyInstance) {
     const body = req.body as Record<string, unknown>;
     const allowed = [
       "title", "prompt", "provider", "cwd", "priority", "status", "max_attempts",
-      "model", "effort", "deliver_mode", "base_branch", "work_branch",
+      "model", "effort", "deliver_mode", "base_branch", "work_branch", "verify_cmd",
     ];
     const updates = allowed.filter((k) => body[k] !== undefined);
     if (updates.length === 0) return reply.code(400).send({ error: "nada para atualizar" });
     const invalid =
-      invalidModelEffort(body.model, body.effort) ?? invalidDelivery(body);
+      invalidModelEffort(body.model, body.effort) ??
+      invalidDelivery(body) ??
+      invalidVerifyCmd(body.verify_cmd);
     if (invalid) return reply.code(400).send({ error: invalid });
     // "" no form significa "padrão" → null no banco
     if (body.model === "") body.model = null;
     if (body.effort === "") body.effort = null;
     if (body.base_branch === "") body.base_branch = null;
     if (body.work_branch === "") body.work_branch = null;
+    if (body.verify_cmd === "") body.verify_cmd = null;
     if (body.status !== undefined && !["pending", "blocked", "done", "failed"].includes(String(body.status))) {
       return reply.code(400).send({ error: "status inválido" });
     }
     const sql = `UPDATE tasks SET ${updates.map((k) => `${k} = ?`).join(", ")} WHERE id = ?`;
     db.prepare(sql).run(...updates.map((k) => body[k] as string | number), id);
-    return db.prepare("SELECT * FROM tasks WHERE id = ?").get(id);
+    const updated = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as {
+      cwd: string;
+      verify_cmd: string | null;
+    };
+    if (body.verify_cmd !== undefined) rememberVerifyCmd(updated.cwd, updated.verify_cmd);
+    return updated;
   });
 
   app.delete("/api/tasks/:id", async (req, reply) => {
@@ -369,6 +402,20 @@ export async function registerRoutes(app: FastifyInstance) {
     const branches = await listRemoteBranches(resolve(path));
     if (branches === null) return { repo: false, branches: [] };
     return { repo: true, branches };
+  });
+
+  // ---- verificação (portão de qualidade) ----
+  app.get("/api/verify/info", async (req, reply) => {
+    const q = ((req.query as { path?: string }).path ?? "").trim();
+    if (!q) return reply.code(400).send({ error: "path é obrigatório" });
+    const path = resolve(q);
+    const row = db
+      .prepare("SELECT verify_cmd FROM repo_prefs WHERE cwd = ?")
+      .get(q) as { verify_cmd: string } | undefined;
+    return {
+      remembered: row?.verify_cmd ?? null,
+      suggestions: existsSync(path) ? suggestVerifyCommands(path) : [],
+    };
   });
 
   // ---- navegador de diretórios (app local, single-user) ----

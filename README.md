@@ -25,6 +25,11 @@ antes que a janela resete e o saldo se perca.
   (`feat/{slug}` por padrão; variáveis `{id}`, `{slug}`, `{date}`). Se a IA não
   alterar nada, não há PR; se o push/PR falhar, o commit fica preservado na
   worktree para inspeção.
+- **Portão de qualidade** (opcional, por tarefa): um comando de verificação
+  (ex.: `npm test`) roda após a IA e antes do commit/PR. Se falhar, a saída é
+  devolvida à IA para **uma** rodada de correção e a verificação roda de novo;
+  persistindo a falha, a tarefa é marcada como falha (sem PR). O formulário
+  sugere comandos detectados no repositório e lembra o último usado por repo.
 - **Scheduler** (tick de 60s), por assinatura:
   1. nunca despacha acima do **teto de segurança** (default 90%, janela 5h ou semanal);
   2. exige **sobra mínima** até o teto (default 15%);

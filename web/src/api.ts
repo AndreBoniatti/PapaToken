@@ -54,6 +54,8 @@ export interface Task {
   pr_url?: string | null;
   /** desfecho da última entrega; null = ainda não entregou */
   deliver_status?: "created" | "no_changes" | "failed" | null;
+  /** comando de verificação (portão de qualidade); null = sem verificação */
+  verify_cmd?: string | null;
 }
 
 /** Níveis de prioridade da UI — o banco guarda o inteiro, então valores
@@ -116,6 +118,10 @@ export const api = {
       `/api/git/branches?path=${encodeURIComponent(path)}`
     ),
   gitDoctor: () => request<GitDoctor>("/api/git/doctor"),
+  verifyInfo: (path: string) =>
+    request<{ remembered: string | null; suggestions: string[] }>(
+      `/api/verify/info?path=${encodeURIComponent(path)}`
+    ),
   refreshUsage: () => request<{ ok: boolean }>("/api/usage/refresh", { method: "POST" }),
   tasks: () => request<Task[]>("/api/tasks"),
   task: (id: number | string) => request<Task>(`/api/tasks/${id}`),

@@ -285,6 +285,9 @@ export default function TaskDetail() {
           <Meta label="Iniciada">{fmtDate(task.started_at)}</Meta>
           <Meta label="Finalizada">{fmtDate(task.finished_at)}</Meta>
           <Meta label="Exit code">{task.exit_code ?? "—"}</Meta>
+          <Meta label="Verificação">
+            {task.verify_cmd ? <span className="mono">{task.verify_cmd}</span> : "—"}
+          </Meta>
           <Meta label="Entrega">
             {task.deliver_mode !== "pr" ? (
               "só executar"

@@ -170,6 +170,48 @@ describe("rotas de tarefas", () => {
   });
 });
 
+describe("verificação (portão de qualidade)", () => {
+  it("persiste o verify_cmd e o memoriza por repositório", async () => {
+    const created = (
+      await app.inject({
+        method: "POST",
+        url: "/api/tasks",
+        payload: {
+          title: "t",
+          prompt: "p",
+          cwd: "C:\\repos\\meu-projeto",
+          verify_cmd: "npm test",
+        },
+      })
+    ).json();
+    expect(created.verify_cmd).toBe("npm test");
+
+    const info = (
+      await app.inject({
+        method: "GET",
+        url: "/api/verify/info?path=" + encodeURIComponent("C:\\repos\\meu-projeto"),
+      })
+    ).json();
+    expect(info.remembered).toBe("npm test");
+  });
+
+  it("rejeita comando com quebra de linha ou longo demais", async () => {
+    const multiline = await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: { title: "t", prompt: "p", verify_cmd: "npm test\nrm -rf /" },
+    });
+    expect(multiline.statusCode).toBe(400);
+
+    const longo = await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: { title: "t", prompt: "p", verify_cmd: "x".repeat(201) },
+    });
+    expect(longo.statusCode).toBe(400);
+  });
+});
+
 describe("diagnóstico de entrega", () => {
   it("GET /api/git/doctor responde o formato esperado", async () => {
     const res = await app.inject({ method: "GET", url: "/api/git/doctor" });

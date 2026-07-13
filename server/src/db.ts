@@ -58,12 +58,19 @@ db.exec(`
     base_branch TEXT,
     work_branch TEXT,
     pr_url TEXT,
-    deliver_status TEXT CHECK (deliver_status IN ('created','no_changes','failed'))
+    deliver_status TEXT CHECK (deliver_status IN ('created','no_changes','failed')),
+    verify_cmd TEXT
   );
 
   CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
+  );
+
+  -- memória por repositório: comando de verificação usado da última vez
+  CREATE TABLE IF NOT EXISTS repo_prefs (
+    cwd TEXT PRIMARY KEY,
+    verify_cmd TEXT NOT NULL
   );
 `);
 
@@ -79,6 +86,7 @@ addColumn("deliver_mode", "deliver_mode TEXT NOT NULL DEFAULT 'none' CHECK (deli
 addColumn("base_branch", "base_branch TEXT");
 addColumn("work_branch", "work_branch TEXT");
 addColumn("pr_url", "pr_url TEXT");
+addColumn("verify_cmd", "verify_cmd TEXT");
 const hadDeliverStatus = taskCols.some((c) => c.name === "deliver_status");
 addColumn(
   "deliver_status",

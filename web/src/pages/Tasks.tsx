@@ -21,6 +21,7 @@ const emptyForm = {
   deliver_mode: "none",
   base_branch: "",
   work_branch: "",
+  verify_cmd: "",
 };
 
 const MODEL_OPTIONS: Record<string, { value: string; label: string }[]> = {
@@ -51,12 +52,40 @@ export default function Tasks() {
   const [error, setError] = useState<string | null>(null);
   const [gitInfo, setGitInfo] = useState<{ repo: boolean; branches: string[] } | null>(null);
   const [doctor, setDoctor] = useState<GitDoctor | null>(null);
+  const [verifySuggestions, setVerifySuggestions] = useState<string[]>([]);
 
   // diagnóstico do ambiente de PR no momento em que o usuário liga a entrega
   useEffect(() => {
     if (form.deliver_mode !== "pr") return;
     api.gitDoctor().then(setDoctor).catch(() => setDoctor(null));
   }, [form.deliver_mode]);
+
+  // sugestões + memória do comando de verificação para o diretório escolhido
+  useEffect(() => {
+    if (!form.cwd.trim()) {
+      setVerifySuggestions([]);
+      return;
+    }
+    const timer = setTimeout(() => {
+      api
+        .verifyInfo(form.cwd.trim())
+        .then((info) => {
+          const all = [info.remembered, ...info.suggestions].filter(
+            (s): s is string => !!s
+          );
+          setVerifySuggestions([...new Set(all)]);
+          // pré-preenche com o comando lembrado deste repositório, sem
+          // sobrescrever algo que o usuário já digitou
+          if (info.remembered) {
+            setForm((prev) =>
+              prev.verify_cmd === "" ? { ...prev, verify_cmd: info.remembered! } : prev
+            );
+          }
+        })
+        .catch(() => setVerifySuggestions([]));
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [form.cwd]);
 
   // sugestões de branch quando a entrega por PR está ligada e há cwd
   useEffect(() => {
@@ -322,6 +351,20 @@ export default function Tasks() {
                 </div>
               </>
             )}
+            <div className="field">
+              <label>Comando de verificação (opcional)</label>
+              <input
+                list="verify-suggestions"
+                value={form.verify_cmd}
+                onChange={(e) => setForm({ ...form, verify_cmd: e.target.value })}
+                placeholder="ex.: npm test — roda após a IA; se falhar, ela corrige"
+              />
+              <datalist id="verify-suggestions">
+                {verifySuggestions.map((s) => (
+                  <option key={s} value={s} />
+                ))}
+              </datalist>
+            </div>
             <div className="field full">
               <label>Prompt (instrução completa para a IA)</label>
               <textarea

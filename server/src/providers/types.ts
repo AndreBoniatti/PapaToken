@@ -40,6 +40,8 @@ export interface TaskRow {
   work_branch: string | null;
   /** URL do PR aberto, quando houver */
   pr_url: string | null;
+  /** comando de verificação rodado após a IA (portão de qualidade); null = sem verificação */
+  verify_cmd: string | null;
 }
 
 export function parseAttachments(task: Pick<TaskRow, "attachments">): string[] {

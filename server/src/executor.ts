@@ -15,6 +15,7 @@ import type { PreparedWorktree } from "./git.js";
 import { getProvider } from "./providers/index.js";
 import { parseAttachments } from "./providers/types.js";
 import type { ProviderId, TaskRow } from "./providers/types.js";
+import { runVerifyCommand } from "./verify.js";
 
 /** Prompt efetivo: anexos são apresentados ao modelo antes da instrução. */
 function buildPrompt(task: TaskRow): string {
@@ -25,6 +26,25 @@ function buildPrompt(task: TaskRow): string {
     files.map((f) => `- anexos/${f}`).join("\n") +
     `\nLeia/analise esses arquivos conforme necessário antes de executar a tarefa.\n\n---\n\n` +
     task.prompt
+  );
+}
+
+/**
+ * Prompt da rodada de correção: a IA volta ao mesmo diretório com a saída
+ * da verificação que falhou em mãos.
+ */
+export function buildVerifyFeedbackPrompt(
+  task: Pick<TaskRow, "prompt">,
+  verifyCmd: string,
+  verifyOutput: string
+): string {
+  const tail = verifyOutput.length > 4000 ? verifyOutput.slice(-4000) : verifyOutput;
+  return (
+    `Você acabou de executar a tarefa abaixo neste diretório, mas a verificação automática falhou.\n\n` +
+    `[Tarefa original]\n${task.prompt}\n\n` +
+    `[Verificação que falhou]\nComando: ${verifyCmd}\nSaída (final):\n${tail}\n\n` +
+    `Corrija o que for necessário para a verificação passar. Não altere o comando de verificação ` +
+    `nem enfraqueça testes existentes — a menos que estejam objetivamente errados.`
   );
 }
 
@@ -161,27 +181,102 @@ export async function runTask(taskId: number, forcedProvider?: ProviderId): Prom
   ).run(providerId, taskId);
   emit({ type: "task", taskId, status: "running" });
 
-  let stdout = "";
-  let stderr = "";
+  const commandLine = [cmd, ...args].join(" ");
+  const first = await spawnProvider(commandLine, buildPrompt(task), execCwd, timeoutMs);
 
+  let stdout = first.stdout;
+  let stderr = first.stderr;
+  let exitCode = first.exitCode;
+  let timedOut = first.timedOut;
+
+  // Portão de qualidade: verificação → uma rodada de correção → re-verificação
+  const verifyNotes: string[] = [];
+  let verifyFailed = false;
+  const verifyCmd = task.verify_cmd?.trim();
+  if (verifyCmd && runSucceeded(providerId, first)) {
+    const verifyTimeout = Math.min(timeoutMs, 10 * 60_000);
+    let check = await runVerifyCommand(verifyCmd, execCwd, verifyTimeout);
+    if (check.code === 0) {
+      verifyNotes.push(`[verificação] "${verifyCmd}" passou`);
+    } else {
+      verifyNotes.push(
+        `[verificação] "${verifyCmd}" falhou (exit ${check.code}${check.timedOut ? ", timeout" : ""}) — devolvendo a saída para a IA corrigir`
+      );
+      emit({
+        type: "scheduler",
+        message: `Tarefa #${task.id}: verificação falhou — rodada de correção iniciada`,
+      });
+      const second = await spawnProvider(
+        commandLine,
+        buildVerifyFeedbackPrompt(task, verifyCmd, check.output),
+        execCwd,
+        timeoutMs
+      );
+      stdout += `\n\n===== rodada de correção (verificação) =====\n${second.stdout}`;
+      if (second.stderr.trim()) {
+        stderr += `\n===== rodada de correção =====\n${second.stderr}`;
+      }
+      exitCode = second.exitCode;
+      timedOut = timedOut || second.timedOut;
+
+      if (runSucceeded(providerId, second)) {
+        check = await runVerifyCommand(verifyCmd, execCwd, verifyTimeout);
+        if (check.code === 0) {
+          verifyNotes.push("[verificação] passou após a rodada de correção");
+        } else {
+          verifyFailed = true;
+          verifyNotes.push(
+            `[verificação] continuou falhando (exit ${check.code}) após a correção — tarefa marcada como falha`
+          );
+        }
+      } else {
+        verifyFailed = true;
+        verifyNotes.push("[verificação] a rodada de correção não concluiu com sucesso");
+      }
+      if (verifyFailed) {
+        verifyNotes.push(`[verificação] última saída:\n${check.output.slice(-2000)}`);
+      }
+    }
+  }
+
+  const status = finishTask(task, providerId, exitCode, stdout, stderr, timedOut, {
+    verifyFailed,
+    verifyNotes,
+  });
+  if (worktree) {
+    await deliver(task, providerId, worktree, status, stdout);
+  }
+}
+
+interface RunOutcome {
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+}
+
+function spawnProvider(
+  commandLine: string,
+  promptText: string,
+  cwd: string,
+  timeoutMs: number
+): Promise<RunOutcome> {
   const isWindows = process.platform === "win32";
-
-  const { exitCode, timedOut } = await new Promise<{
-    exitCode: number | null;
-    timedOut: boolean;
-  }>((resolve) => {
+  return new Promise((resolve) => {
     // shell:true is required on Windows for npm .cmd shims; the command line is
     // built only from static strings — the prompt travels via stdin, never
     // through the shell. No POSIX, detached cria um process group próprio para
     // o kill de timeout alcançar a árvore inteira (shell + CLI).
-    const child = spawn([cmd, ...args].join(" "), {
-      cwd: execCwd,
+    const child = spawn(commandLine, {
+      cwd,
       shell: true,
       detached: !isWindows,
       stdio: ["pipe", "pipe", "pipe"],
       env: process.env,
     });
 
+    let stdout = "";
+    let stderr = "";
     let killedByTimeout = false;
     const timer = setTimeout(() => {
       killedByTimeout = true;
@@ -212,19 +307,21 @@ export async function runTask(taskId: number, forcedProvider?: ProviderId): Prom
       stderr += `\n[stdin error] ${err.message}`;
     });
 
-    child.stdin.write(buildPrompt(task));
+    child.stdin.write(promptText);
     child.stdin.end();
 
     child.on("close", (code) => {
       clearTimeout(timer);
-      resolve({ exitCode: code, timedOut: killedByTimeout });
+      resolve({ exitCode: code, stdout, stderr, timedOut: killedByTimeout });
     });
   });
+}
 
-  const status = finishTask(task, providerId, exitCode, stdout, stderr, timedOut);
-  if (worktree) {
-    await deliver(task, providerId, worktree, status, stdout);
-  }
+/** mesma regra de sucesso do finishTask (envelope do claude ou exit 0) */
+function runSucceeded(providerId: ProviderId, run: RunOutcome): boolean {
+  if (run.timedOut) return false;
+  const envelope = providerId === "claude" ? parseClaudeEnvelope(run.stdout) : null;
+  return envelope ? envelope.is_error === false : run.exitCode === 0;
 }
 
 /** pós-execução da entrega por PR: commit/push/PR no sucesso, autópsia na falha */
@@ -274,11 +371,15 @@ function finishTask(
   exitCode: number | null,
   stdout: string,
   stderr: string,
-  timedOut: boolean
+  timedOut: boolean,
+  verify?: { verifyFailed: boolean; verifyNotes: string[] }
 ): "done" | "failed" | "pending" {
   running.delete(providerId);
 
   let log = stdout + (stderr.trim() ? `\n[stderr]\n${stderr}` : "");
+  if (verify && verify.verifyNotes.length > 0) {
+    log += `\n${verify.verifyNotes.join("\n")}`;
+  }
   let status: "done" | "failed" | "pending";
 
   const envelope = providerId === "claude" ? parseClaudeEnvelope(stdout) : null;
@@ -287,6 +388,10 @@ function finishTask(
   if (timedOut) {
     status = "failed";
     log += "\n[executor] tarefa encerrada por timeout";
+  } else if (verify?.verifyFailed) {
+    // verificação reprovada mesmo após a rodada de correção — sem nova
+    // tentativa automática (repetir a tarefa inteira só queimaria tokens)
+    status = "failed";
   } else if (succeeded) {
     status = "done";
   } else {
