@@ -126,6 +126,25 @@ export default function Tasks() {
 
   const visible = filter === "all" ? tasks : tasks.filter((t) => t.status === filter);
 
+  // resumos exibidos nas seções recolhidas do formulário
+  const providerLabel: Record<string, string> = {
+    any: "Qualquer IA",
+    claude: "Claude Code",
+    codex: "Codex",
+  };
+  const execSummary = [
+    providerLabel[form.provider],
+    form.model || "modelo padrão",
+    form.effort ? `effort ${form.effort}` : "effort padrão",
+    priorityLabel(form.priority),
+  ].join(" · ");
+  const deliverySummary = [
+    form.verify_cmd ? `verificação: ${form.verify_cmd}` : "sem verificação",
+    form.deliver_mode === "pr"
+      ? `Pull Request${form.base_branch ? ` → ${form.base_branch}` : ""}`
+      : "só executar",
+  ].join(" · ");
+
   const pasteImages = (e: React.ClipboardEvent) => {
     const items = Array.from(e.clipboardData.items).filter((i) =>
       i.type.startsWith("image/")
@@ -210,6 +229,60 @@ export default function Tasks() {
                 </button>
               </div>
             </div>
+            <div className="field full">
+              <label>Prompt (instrução completa para a IA)</label>
+              <textarea
+                value={form.prompt}
+                onChange={(e) => setForm({ ...form, prompt: e.target.value })}
+                onPaste={pasteImages}
+                placeholder="Descreva a tarefa com contexto suficiente para execução autônoma… (Ctrl+V cola prints como anexo)"
+              />
+            </div>
+            <div className="field full">
+              <label>Anexos (opcional — prints podem ser colados com Ctrl+V no prompt)</label>
+              <input
+                type="file"
+                multiple
+                onChange={(e) => {
+                  // snapshot antes de limpar: a FileList é um objeto vivo e
+                  // zerar o input a esvaziaria antes do estado atualizar
+                  const picked = Array.from(e.target.files ?? []);
+                  e.target.value = "";
+                  setFiles((prev) => [...prev, ...picked]);
+                }}
+              />
+              {files.length > 0 && (
+                <div style={{ marginTop: 8 }}>
+                  {files.map((f, i) => (
+                    <span key={`${f.name}-${i}`} className="attachment-chip">
+                      <button
+                        type="button"
+                        className="attachment-name"
+                        title={f.type.startsWith("image/") ? "visualizar" : f.name}
+                        onClick={() => openFilePreview(f)}
+                      >
+                        📎 {f.name}
+                      </button>
+                      <button
+                        type="button"
+                        title="remover"
+                        onClick={() => setFiles(files.filter((_, j) => j !== i))}
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <details className="form-section">
+            <summary>
+              <strong>Execução</strong>
+              <span className="summary-hint">{execSummary}</span>
+            </summary>
+            <div className="form-grid">
             <div className="field">
               <label>IA designada</label>
               <select
@@ -289,6 +362,29 @@ export default function Tasks() {
                 </select>
               )}
             </div>
+            </div>
+          </details>
+
+          <details className="form-section">
+            <summary>
+              <strong>Qualidade e entrega</strong>
+              <span className="summary-hint">{deliverySummary}</span>
+            </summary>
+            <div className="form-grid">
+            <div className="field">
+              <label>Comando de verificação (opcional)</label>
+              <input
+                list="verify-suggestions"
+                value={form.verify_cmd}
+                onChange={(e) => setForm({ ...form, verify_cmd: e.target.value })}
+                placeholder="ex.: npm test — roda após a IA; se falhar, ela corrige"
+              />
+              <datalist id="verify-suggestions">
+                {verifySuggestions.map((s) => (
+                  <option key={s} value={s} />
+                ))}
+              </datalist>
+            </div>
             <div className="field">
               <label>Entrega</label>
               <select
@@ -352,67 +448,9 @@ export default function Tasks() {
                 </div>
               </>
             )}
-            <div className="field">
-              <label>Comando de verificação (opcional)</label>
-              <input
-                list="verify-suggestions"
-                value={form.verify_cmd}
-                onChange={(e) => setForm({ ...form, verify_cmd: e.target.value })}
-                placeholder="ex.: npm test — roda após a IA; se falhar, ela corrige"
-              />
-              <datalist id="verify-suggestions">
-                {verifySuggestions.map((s) => (
-                  <option key={s} value={s} />
-                ))}
-              </datalist>
             </div>
-            <div className="field full">
-              <label>Prompt (instrução completa para a IA)</label>
-              <textarea
-                value={form.prompt}
-                onChange={(e) => setForm({ ...form, prompt: e.target.value })}
-                onPaste={pasteImages}
-                placeholder="Descreva a tarefa com contexto suficiente para execução autônoma… (Ctrl+V cola prints como anexo)"
-              />
-            </div>
-            <div className="field full">
-              <label>Anexos (prints, documentos — opcional; prints podem ser colados com Ctrl+V no prompt)</label>
-              <input
-                type="file"
-                multiple
-                onChange={(e) => {
-                  // snapshot antes de limpar: a FileList é um objeto vivo e
-                  // zerar o input a esvaziaria antes do estado atualizar
-                  const picked = Array.from(e.target.files ?? []);
-                  e.target.value = "";
-                  setFiles((prev) => [...prev, ...picked]);
-                }}
-              />
-              {files.length > 0 && (
-                <div style={{ marginTop: 8 }}>
-                  {files.map((f, i) => (
-                    <span key={`${f.name}-${i}`} className="attachment-chip">
-                      <button
-                        type="button"
-                        className="attachment-name"
-                        title={f.type.startsWith("image/") ? "visualizar" : f.name}
-                        onClick={() => openFilePreview(f)}
-                      >
-                        📎 {f.name}
-                      </button>
-                      <button
-                        type="button"
-                        title="remover"
-                        onClick={() => setFiles(files.filter((_, j) => j !== i))}
-                      >
-                        ✕
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
+          </details>
+
           <div className="toolbar mt">
             <button className="primary" onClick={() => void submit()}>
               Criar tarefa

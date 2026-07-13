@@ -121,6 +121,30 @@ tr:hover td { background: var(--panel-2); }
 
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .form-grid .full { grid-column: 1 / -1; }
+
+/* seções expansíveis do formulário de tarefa */
+.form-section { border: 1px solid var(--border); border-radius: 8px; margin-top: 12px; }
+.form-section summary {
+  cursor: pointer;
+  padding: 10px 14px;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  list-style: none;
+  user-select: none;
+}
+.form-section summary::-webkit-details-marker { display: none; }
+.form-section summary::before { content: "▸"; color: var(--muted); font-size: 0.8rem; }
+.form-section[open] > summary::before { content: "▾"; }
+.form-section summary strong { font-size: 0.88rem; font-weight: 600; }
+.form-section .summary-hint {
+  color: var(--muted);
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.form-section > .form-grid { padding: 2px 14px 14px; }
 .field label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 5px; }
 .field input, .field select, .field textarea { width: 100%; }
 textarea { min-height: 90px; resize: vertical; }
