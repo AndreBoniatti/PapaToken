@@ -2,7 +2,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { api, onServerEvent, priorityLabel, taskAttachments, type Task } from "../api";
+import {
+  api,
+  fmtCost,
+  fmtTokens,
+  onServerEvent,
+  priorityLabel,
+  taskAttachments,
+  type Task,
+} from "../api";
 
 /** <pre> do markdown com botão de copiar */
 function CodeBlock(props: React.ComponentProps<"pre">) {
@@ -294,6 +302,12 @@ export default function TaskDetail() {
           <Meta label="Iniciada">{fmtDate(task.started_at)}</Meta>
           <Meta label="Finalizada">{fmtDate(task.finished_at)}</Meta>
           <Meta label="Exit code">{task.exit_code ?? "—"}</Meta>
+          <Meta label="Custo (API equiv.)">{fmtCost(task.cost_usd)}</Meta>
+          <Meta label="Tokens">
+            {task.tokens_in != null
+              ? `${fmtTokens(task.tokens_in)} in / ${fmtTokens(task.tokens_out ?? 0)} out`
+              : "—"}
+          </Meta>
           <Meta label="Verificação">
             {task.verify_cmd ? <span className="mono">{task.verify_cmd}</span> : "—"}
           </Meta>

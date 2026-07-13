@@ -56,6 +56,37 @@ export interface Task {
   deliver_status?: "created" | "no_changes" | "failed" | null;
   /** comando de verificação (portão de qualidade); null = sem verificação */
   verify_cmd?: string | null;
+  /** custo acumulado em valor de API equivalente (só Claude expõe) */
+  cost_usd?: number | null;
+  tokens_in?: number | null;
+  tokens_out?: number | null;
+}
+
+export interface StatsAgg {
+  tasks_done: number;
+  cost_usd: number;
+  tokens_in: number;
+  tokens_out: number;
+}
+
+export interface Stats {
+  month: StatsAgg;
+  total: StatsAgg;
+}
+
+export function fmtCost(v: number | null | undefined): string {
+  if (v === null || v === undefined) return "—";
+  if (v > 0 && v < 0.01) return "< US$ 0,01";
+  return (
+    "US$ " + v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  );
+}
+
+export function fmtTokens(n: number | null | undefined): string {
+  if (n === null || n === undefined) return "—";
+  if (n >= 1_000_000) return (n / 1_000_000).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "M";
+  if (n >= 1_000) return Math.round(n / 1_000).toLocaleString("pt-BR") + "k";
+  return String(n);
 }
 
 /** Níveis de prioridade da UI — o banco guarda o inteiro, então valores
@@ -156,6 +187,7 @@ export const api = {
     request<Task>(`/api/tasks/${id}/attachments/${encodeURIComponent(name)}`, {
       method: "DELETE",
     }),
+  stats: () => request<Stats>("/api/stats"),
   settings: () => request<Settings>("/api/settings"),
   saveSettings: (s: Settings) =>
     request<Settings>("/api/settings", { method: "PATCH", body: JSON.stringify(s) }),

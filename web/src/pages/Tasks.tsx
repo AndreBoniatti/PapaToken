@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   api,
+  fmtCost,
   onServerEvent,
   PRIORITY_OPTIONS,
   priorityLabel,
@@ -453,6 +454,7 @@ export default function Tasks() {
             <th>Status</th>
             <th>Criada</th>
             <th>Executada por</th>
+            <th>Custo</th>
             <th>PR</th>
           </tr>
         </thead>
@@ -472,6 +474,7 @@ export default function Tasks() {
               </td>
               <td className="muted">{new Date(t.created_at + "Z").toLocaleString("pt-BR")}</td>
               <td>{t.executed_by ?? "—"}</td>
+              <td className="muted">{fmtCost(t.cost_usd)}</td>
               <td>
                 {t.pr_url ? (
                   <a href={t.pr_url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
@@ -491,7 +494,7 @@ export default function Tasks() {
           ))}
           {visible.length === 0 && (
             <tr>
-              <td colSpan={8} className="muted">
+              <td colSpan={9} className="muted">
                 Nenhuma tarefa {filter !== "all" ? `com status “${filter}”` : "cadastrada"}.
               </td>
             </tr>

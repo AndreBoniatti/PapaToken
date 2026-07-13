@@ -59,7 +59,10 @@ db.exec(`
     work_branch TEXT,
     pr_url TEXT,
     deliver_status TEXT CHECK (deliver_status IN ('created','no_changes','failed')),
-    verify_cmd TEXT
+    verify_cmd TEXT,
+    cost_usd REAL,
+    tokens_in INTEGER,
+    tokens_out INTEGER
   );
 
   CREATE TABLE IF NOT EXISTS settings (
@@ -87,6 +90,9 @@ addColumn("base_branch", "base_branch TEXT");
 addColumn("work_branch", "work_branch TEXT");
 addColumn("pr_url", "pr_url TEXT");
 addColumn("verify_cmd", "verify_cmd TEXT");
+addColumn("cost_usd", "cost_usd REAL");
+addColumn("tokens_in", "tokens_in INTEGER");
+addColumn("tokens_out", "tokens_out INTEGER");
 const hadDeliverStatus = taskCols.some((c) => c.name === "deliver_status");
 addColumn(
   "deliver_status",

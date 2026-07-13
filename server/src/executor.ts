@@ -110,6 +110,50 @@ interface ClaudeEnvelope {
   type: string;
   is_error: boolean;
   result?: string;
+  total_cost_usd?: number;
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+  };
+}
+
+export interface RunUsage {
+  costUsd: number;
+  tokensIn: number;
+  tokensOut: number;
+}
+
+/**
+ * Custo/tokens de UMA rodada da IA, extraídos do envelope JSON do Claude.
+ * O Codex não expõe custo no stdout do exec — retorna null (a UI mostra "—").
+ */
+export function extractRunUsage(providerId: ProviderId, stdout: string): RunUsage | null {
+  if (providerId !== "claude") return null;
+  const env = parseClaudeEnvelope(stdout);
+  if (!env) return null;
+  const u = env.usage ?? {};
+  const usage: RunUsage = {
+    costUsd: env.total_cost_usd ?? 0,
+    tokensIn:
+      (u.input_tokens ?? 0) +
+      (u.cache_creation_input_tokens ?? 0) +
+      (u.cache_read_input_tokens ?? 0),
+    tokensOut: u.output_tokens ?? 0,
+  };
+  if (usage.costUsd === 0 && usage.tokensIn === 0 && usage.tokensOut === 0) return null;
+  return usage;
+}
+
+function sumUsage(a: RunUsage | null, b: RunUsage | null): RunUsage | null {
+  if (!a) return b;
+  if (!b) return a;
+  return {
+    costUsd: a.costUsd + b.costUsd,
+    tokensIn: a.tokensIn + b.tokensIn,
+    tokensOut: a.tokensOut + b.tokensOut,
+  };
 }
 
 /** Parse the --output-format json envelope from Claude's stdout, if present. */
@@ -228,6 +272,8 @@ interface ExecResult {
   succeeded: boolean;
   verifyFailed: boolean;
   verifyNotes: string[];
+  /** custo/tokens somados de todas as rodadas desta execução */
+  usage: RunUsage | null;
 }
 
 /**
@@ -250,6 +296,7 @@ async function executeWithVerification(
   let exitCode = first.exitCode;
   let timedOut = first.timedOut;
   let succeeded = runSucceeded(providerId, first);
+  let usage = extractRunUsage(providerId, first.stdout);
 
   const verifyNotes: string[] = [];
   let verifyFailed = false;
@@ -280,6 +327,7 @@ async function executeWithVerification(
       exitCode = second.exitCode;
       timedOut = timedOut || second.timedOut;
       succeeded = runSucceeded(providerId, second);
+      usage = sumUsage(usage, extractRunUsage(providerId, second.stdout));
 
       if (succeeded) {
         check = await runVerifyCommand(verifyCmd, execCwd, verifyTimeout);
@@ -301,7 +349,18 @@ async function executeWithVerification(
     }
   }
 
-  return { stdout, stderr, exitCode, timedOut, succeeded, verifyFailed, verifyNotes };
+  return { stdout, stderr, exitCode, timedOut, succeeded, verifyFailed, verifyNotes, usage };
+}
+
+/** soma custo/tokens da execução na tarefa (acumula entre tentativas e reviews) */
+function accumulateUsage(taskId: number, usage: RunUsage | null) {
+  if (!usage) return;
+  db.prepare(
+    `UPDATE tasks SET cost_usd = COALESCE(cost_usd, 0) + ?,
+                      tokens_in = COALESCE(tokens_in, 0) + ?,
+                      tokens_out = COALESCE(tokens_out, 0) + ?
+     WHERE id = ?`
+  ).run(usage.costUsd, usage.tokensIn, usage.tokensOut, taskId);
 }
 
 interface RunOutcome {
@@ -464,6 +523,7 @@ function finishReview(
   db.prepare(
     "UPDATE tasks SET status = ?, finished_at = datetime('now'), exit_code = ?, output_log = COALESCE(output_log, '') || ? WHERE id = ?"
   ).run(status, r.exitCode, section.slice(0, MAX_LOG_BYTES), task.id);
+  accumulateUsage(task.id, r.usage);
   emit({ type: "task", taskId: task.id, status });
   return status;
 }
@@ -549,6 +609,7 @@ function finishTask(
   db.prepare(
     `UPDATE tasks SET status = ?, finished_at = datetime('now'), exit_code = ?, output_log = ? WHERE id = ?`
   ).run(status, r.exitCode, log.slice(0, MAX_LOG_BYTES), task.id);
+  accumulateUsage(task.id, r.usage);
   emit({ type: "task", taskId: task.id, status });
   return status;
 }

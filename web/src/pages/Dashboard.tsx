@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, onServerEvent, type SubscriptionUsage, type UsageResponse, type UsageWindow } from "../api";
+import {
+  api,
+  fmtCost,
+  fmtTokens,
+  onServerEvent,
+  type Stats,
+  type StatsAgg,
+  type SubscriptionUsage,
+  type UsageResponse,
+  type UsageWindow,
+} from "../api";
 
 const WINDOW_LABEL: Record<UsageWindow["id"], string> = {
   session: "Janela de 5 horas",
@@ -69,8 +79,24 @@ function SubscriptionCard({ sub }: { sub: SubscriptionUsage }) {
   );
 }
 
+function HarvestStat({ label, agg }: { label: string; agg: StatsAgg }) {
+  return (
+    <div>
+      <span className="muted">{label}</span>
+      <div style={{ fontSize: "1.5rem", fontWeight: 700, margin: "2px 0" }}>
+        {fmtCost(agg.cost_usd)}
+      </div>
+      <span className="muted" style={{ fontSize: "0.8rem" }}>
+        {agg.tasks_done} tarefa(s) concluída(s) · {fmtTokens(agg.tokens_in)} in /{" "}
+        {fmtTokens(agg.tokens_out)} out
+      </span>
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const [data, setData] = useState<UsageResponse | null>(null);
+  const [stats, setStats] = useState<Stats | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -81,6 +107,7 @@ export default function Dashboard() {
         setError(null);
       })
       .catch((e) => setError(e.message));
+    api.stats().then(setStats).catch(() => setStats(null));
   }, []);
 
   useEffect(() => {
@@ -122,6 +149,20 @@ export default function Dashboard() {
           <SubscriptionCard key={s.id} sub={s} />
         ))}
       </div>
+      {stats && (
+        <div className="card" style={{ marginTop: 18 }}>
+          <div className="card-head">
+            <span className="card-title">🌾 Valor colhido</span>
+            <span className="muted" style={{ fontSize: "0.78rem" }}>
+              custo de API equivalente das tarefas executadas (Claude; Codex não expõe)
+            </span>
+          </div>
+          <div style={{ display: "flex", gap: 48, flexWrap: "wrap" }}>
+            <HarvestStat label="Este mês" agg={stats.month} />
+            <HarvestStat label="Desde o início" agg={stats.total} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

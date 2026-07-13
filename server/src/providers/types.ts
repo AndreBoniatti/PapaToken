@@ -42,6 +42,10 @@ export interface TaskRow {
   pr_url: string | null;
   /** comando de verificação rodado após a IA (portão de qualidade); null = sem verificação */
   verify_cmd: string | null;
+  /** custo acumulado em valor de API equivalente (só Claude expõe); null = sem dado */
+  cost_usd: number | null;
+  tokens_in: number | null;
+  tokens_out: number | null;
 }
 
 export function parseAttachments(task: Pick<TaskRow, "attachments">): string[] {

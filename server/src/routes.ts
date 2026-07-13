@@ -137,7 +137,7 @@ export async function registerRoutes(app: FastifyInstance) {
       .prepare(
         `SELECT id, title, provider, cwd, priority, status, created_at, started_at,
                 finished_at, executed_by, exit_code, attempts, max_attempts,
-                deliver_mode, deliver_status, pr_url
+                deliver_mode, deliver_status, pr_url, cost_usd
          FROM tasks ORDER BY
            CASE status WHEN 'running' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END,
            -- fila (running/pending): mesma ordem que o despacho usa (nextTask)
@@ -414,6 +414,25 @@ export async function registerRoutes(app: FastifyInstance) {
     const branches = await listRemoteBranches(resolve(path));
     if (branches === null) return { repo: false, branches: [] };
     return { repo: true, branches };
+  });
+
+  // ---- estatísticas de custo/consumo ----
+  app.get("/api/stats", async () => {
+    const agg = (where: string) =>
+      db
+        .prepare(
+          `SELECT
+             COALESCE(SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END), 0) AS tasks_done,
+             COALESCE(SUM(cost_usd), 0) AS cost_usd,
+             COALESCE(SUM(tokens_in), 0) AS tokens_in,
+             COALESCE(SUM(tokens_out), 0) AS tokens_out
+           FROM tasks ${where}`
+        )
+        .get();
+    return {
+      month: agg("WHERE finished_at >= strftime('%Y-%m-01', 'now')"),
+      total: agg(""),
+    };
   });
 
   // ---- verificação (portão de qualidade) ----
