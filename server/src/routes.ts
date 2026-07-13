@@ -13,6 +13,7 @@ import { homedir } from "node:os";
 import { db, getSettings, setSetting } from "./db.js";
 import { bus } from "./events.js";
 import { blockedInfo, isRunning, runTask } from "./executor.js";
+import { gitDoctor, isValidBranchName, listRemoteBranches } from "./git.js";
 import { evaluate, latestUsage, refreshUsage } from "./scheduler.js";
 import { parseAttachments } from "./providers/types.js";
 import type { ProviderId } from "./providers/types.js";
@@ -26,6 +27,7 @@ const SETTING_KEYS = new Set([
   "mode",
   "default_workspace_dir",
   "claude_permission_mode",
+  "branch_template",
 ]);
 
 // model/effort entram na linha de comando do CLI (shell) — só caracteres seguros
@@ -38,6 +40,22 @@ function invalidModelEffort(model?: unknown, effort?: unknown): string | null {
   }
   if (effort !== undefined && effort !== null && effort !== "" && !EFFORT_VALUES.has(String(effort))) {
     return "effort deve ser minimal | low | medium | high | xhigh | max";
+  }
+  return null;
+}
+
+function invalidDelivery(body: Record<string, unknown>): string | null {
+  if (
+    body.deliver_mode !== undefined &&
+    !["none", "pr"].includes(String(body.deliver_mode))
+  ) {
+    return "deliver_mode deve ser none | pr";
+  }
+  for (const k of ["base_branch", "work_branch"] as const) {
+    const v = body[k];
+    if (v !== undefined && v !== null && v !== "" && !isValidBranchName(String(v))) {
+      return `${k} inválido — use um nome de branch válido (letras, números, ., _, -, /)`;
+    }
   }
   return null;
 }
@@ -98,7 +116,8 @@ export async function registerRoutes(app: FastifyInstance) {
     return db
       .prepare(
         `SELECT id, title, provider, cwd, priority, status, created_at, started_at,
-                finished_at, executed_by, exit_code, attempts, max_attempts
+                finished_at, executed_by, exit_code, attempts, max_attempts,
+                deliver_mode, deliver_status, pr_url
          FROM tasks ORDER BY
            CASE status WHEN 'running' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END,
            -- fila (running/pending): mesma ordem que o despacho usa (nextTask)
@@ -128,20 +147,32 @@ export async function registerRoutes(app: FastifyInstance) {
       max_attempts?: number;
       model?: string;
       effort?: string;
+      deliver_mode?: string;
+      base_branch?: string;
+      work_branch?: string;
     };
     if (!body.title || !body.prompt) {
       return reply.code(400).send({ error: "title e prompt são obrigatórios" });
     }
-    const invalid = invalidModelEffort(body.model, body.effort);
+    const invalid =
+      invalidModelEffort(body.model, body.effort) ??
+      invalidDelivery(body as Record<string, unknown>);
     if (invalid) return reply.code(400).send({ error: invalid });
     const provider: string = ["claude", "codex", "any"].includes(body.provider ?? "")
       ? (body.provider as string)
       : "any";
     const cwd = (body.cwd ?? "").trim();
+    const deliverMode = body.deliver_mode === "pr" ? "pr" : "none";
+    if (deliverMode === "pr" && !cwd) {
+      return reply
+        .code(400)
+        .send({ error: "entrega por PR exige diretório de trabalho (repositório git)" });
+    }
     const result = db
       .prepare(
-        `INSERT INTO tasks (title, prompt, provider, cwd, priority, max_attempts, model, effort)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO tasks (title, prompt, provider, cwd, priority, max_attempts, model, effort,
+                            deliver_mode, base_branch, work_branch)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         body.title,
@@ -151,7 +182,10 @@ export async function registerRoutes(app: FastifyInstance) {
         body.priority ?? 0,
         body.max_attempts ?? 2,
         body.model || null,
-        body.effort || null
+        body.effort || null,
+        deliverMode,
+        body.base_branch?.trim() || null,
+        body.work_branch?.trim() || null
       );
     const id = result.lastInsertRowid as number;
     if (!cwd) {
@@ -172,14 +206,20 @@ export async function registerRoutes(app: FastifyInstance) {
       return reply.code(409).send({ error: "tarefa em execução não pode ser editada" });
     }
     const body = req.body as Record<string, unknown>;
-    const allowed = ["title", "prompt", "provider", "cwd", "priority", "status", "max_attempts", "model", "effort"];
+    const allowed = [
+      "title", "prompt", "provider", "cwd", "priority", "status", "max_attempts",
+      "model", "effort", "deliver_mode", "base_branch", "work_branch",
+    ];
     const updates = allowed.filter((k) => body[k] !== undefined);
     if (updates.length === 0) return reply.code(400).send({ error: "nada para atualizar" });
-    const invalid = invalidModelEffort(body.model, body.effort);
+    const invalid =
+      invalidModelEffort(body.model, body.effort) ?? invalidDelivery(body);
     if (invalid) return reply.code(400).send({ error: invalid });
-    // "" no form significa "padrão do CLI" → null no banco
+    // "" no form significa "padrão" → null no banco
     if (body.model === "") body.model = null;
     if (body.effort === "") body.effort = null;
+    if (body.base_branch === "") body.base_branch = null;
+    if (body.work_branch === "") body.work_branch = null;
     if (body.status !== undefined && !["pending", "blocked", "done", "failed"].includes(String(body.status))) {
       return reply.code(400).send({ error: "status inválido" });
     }
@@ -316,6 +356,19 @@ export async function registerRoutes(app: FastifyInstance) {
       id
     );
     return db.prepare("SELECT * FROM tasks WHERE id = ?").get(id);
+  });
+
+  // ---- git (diagnóstico e sugestões para o formulário de entrega por PR) ----
+  app.get("/api/git/doctor", async () => gitDoctor());
+
+  app.get("/api/git/branches", async (req, reply) => {
+    const path = ((req.query as { path?: string }).path ?? "").trim();
+    if (!path) return reply.code(400).send({ error: "path é obrigatório" });
+    // refs locais de origin — rápido e offline; pode estar desatualizado, mas
+    // é só sugestão (o executor sempre faz fetch da base antes de criar a branch)
+    const branches = await listRemoteBranches(resolve(path));
+    if (branches === null) return { repo: false, branches: [] };
+    return { repo: true, branches };
   });
 
   // ---- navegador de diretórios (app local, single-user) ----

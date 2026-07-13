@@ -100,6 +100,49 @@ describe("rotas de tarefas", () => {
     expect(res.statusCode).toBe(404);
   });
 
+  it("valida os campos de entrega por PR", async () => {
+    const semCwd = await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: { title: "t", prompt: "p", deliver_mode: "pr" },
+    });
+    expect(semCwd.statusCode).toBe(400);
+
+    const branchRuim = await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: { title: "t", prompt: "p", deliver_mode: "pr", cwd: "C:\\repo", work_branch: "a..b" },
+    });
+    expect(branchRuim.statusCode).toBe(400);
+
+    const modoRuim = await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: { title: "t", prompt: "p", deliver_mode: "zip" },
+    });
+    expect(modoRuim.statusCode).toBe(400);
+
+    const ok = await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: {
+        title: "t",
+        prompt: "p",
+        deliver_mode: "pr",
+        cwd: "C:\\repo",
+        base_branch: "stage",
+        work_branch: "feat/minha-branch",
+      },
+    });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toMatchObject({
+      deliver_mode: "pr",
+      base_branch: "stage",
+      work_branch: "feat/minha-branch",
+      pr_url: null,
+    });
+  });
+
   it("lista a fila na ordem real de despacho: prioridade e, no empate, a mais antiga", async () => {
     const create = async (title: string, priority: number) =>
       (
@@ -124,6 +167,18 @@ describe("rotas de tarefas", () => {
     // concluídas/falhas aparecem depois de todas as pendentes
     const statuses = list.map((t) => t.status);
     expect(statuses.lastIndexOf("pending")).toBeLessThan(statuses.indexOf("done"));
+  });
+});
+
+describe("diagnóstico de entrega", () => {
+  it("GET /api/git/doctor responde o formato esperado", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/git/doctor" });
+    expect(res.statusCode).toBe(200);
+    const d = res.json();
+    // valores dependem da máquina — o contrato de formato é o que se trava aqui
+    expect(typeof d.git.installed).toBe("boolean");
+    expect(typeof d.gh.installed).toBe("boolean");
+    expect(typeof d.gh.authenticated).toBe("boolean");
   });
 });
 

@@ -1,7 +1,17 @@
 import { spawn } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { db, getSettings } from "./db.js";
 import { emit } from "./events.js";
+import {
+  buildPrBody,
+  deliverPullRequest,
+  deliveryBlocker,
+  isValidBranchName,
+  prepareWorktree,
+  renderBranchTemplate,
+} from "./git.js";
+import type { PreparedWorktree } from "./git.js";
 import { getProvider } from "./providers/index.js";
 import { parseAttachments } from "./providers/types.js";
 import type { ProviderId, TaskRow } from "./providers/types.js";
@@ -95,19 +105,59 @@ export async function runTask(taskId: number, forcedProvider?: ProviderId): Prom
   const timeoutMs = Number(settings.task_timeout_min ?? "30") * 60_000;
   const { cmd, args } = provider.buildCommand(task);
 
-  try {
-    mkdirSync(task.cwd, { recursive: true });
-  } catch (err) {
-    db.prepare(
-      "UPDATE tasks SET status = 'failed', output_log = ? WHERE id = ?"
-    ).run(`[executor] diretório de trabalho inválido: ${(err as Error).message}`, taskId);
-    emit({ type: "task", taskId, status: "failed" });
-    return;
+  // Entrega por PR: worktree preparada antes de marcar como running — falha
+  // de preparação (repo inválido, sem remote, offline) nem conta tentativa.
+  let worktree: PreparedWorktree | null = null;
+  if (task.deliver_mode === "pr") {
+    try {
+      // pre-flight: falha em ~1s ANTES de gastar tokens se o gh não estiver pronto
+      const blocker = await deliveryBlocker();
+      if (blocker) throw new Error(blocker);
+      const desired =
+        task.work_branch?.trim() ||
+        renderBranchTemplate(settings.branch_template ?? "feat/{slug}", task);
+      if (!isValidBranchName(desired)) {
+        throw new Error(`nome de branch inválido: "${desired}"`);
+      }
+      worktree = await prepareWorktree({
+        repoPath: task.cwd,
+        baseBranch: task.base_branch?.trim() || null,
+        desiredBranch: desired,
+        worktreesDir: join(settings.default_workspace_dir, "worktrees"),
+        taskId: task.id,
+      });
+      // anexos moram no cwd original — copia para a IA enxergar na worktree
+      const anexos = join(task.cwd, "anexos");
+      if (parseAttachments(task).length > 0 && existsSync(anexos)) {
+        cpSync(anexos, join(worktree.worktreePath, "anexos"), { recursive: true });
+      }
+    } catch (err) {
+      db.prepare(
+        "UPDATE tasks SET status = 'failed', output_log = ? WHERE id = ?"
+      ).run(`[entrega] preparação da worktree falhou: ${(err as Error).message}`, taskId);
+      emit({ type: "task", taskId, status: "failed" });
+      return;
+    }
+  }
+  const execCwd = worktree?.worktreePath ?? task.cwd;
+
+  if (!worktree) {
+    try {
+      mkdirSync(task.cwd, { recursive: true });
+    } catch (err) {
+      db.prepare(
+        "UPDATE tasks SET status = 'failed', output_log = ? WHERE id = ?"
+      ).run(`[executor] diretório de trabalho inválido: ${(err as Error).message}`, taskId);
+      emit({ type: "task", taskId, status: "failed" });
+      return;
+    }
   }
 
   running.set(providerId, taskId);
   db.prepare(
-    "UPDATE tasks SET status = 'running', started_at = datetime('now'), executed_by = ?, attempts = attempts + 1 WHERE id = ?"
+    // deliver_status zerado: re-execução não deve exibir desfecho antigo
+    // (pr_url fica — um PR aberto em execução anterior continua existindo)
+    "UPDATE tasks SET status = 'running', started_at = datetime('now'), executed_by = ?, attempts = attempts + 1, deliver_status = NULL WHERE id = ?"
   ).run(providerId, taskId);
   emit({ type: "task", taskId, status: "running" });
 
@@ -116,22 +166,25 @@ export async function runTask(taskId: number, forcedProvider?: ProviderId): Prom
 
   const isWindows = process.platform === "win32";
 
-  await new Promise<void>((resolve) => {
+  const { exitCode, timedOut } = await new Promise<{
+    exitCode: number | null;
+    timedOut: boolean;
+  }>((resolve) => {
     // shell:true is required on Windows for npm .cmd shims; the command line is
     // built only from static strings — the prompt travels via stdin, never
     // through the shell. No POSIX, detached cria um process group próprio para
     // o kill de timeout alcançar a árvore inteira (shell + CLI).
     const child = spawn([cmd, ...args].join(" "), {
-      cwd: task.cwd,
+      cwd: execCwd,
       shell: true,
       detached: !isWindows,
       stdio: ["pipe", "pipe", "pipe"],
       env: process.env,
     });
 
-    let timedOut = false;
+    let killedByTimeout = false;
     const timer = setTimeout(() => {
-      timedOut = true;
+      killedByTimeout = true;
       if (!child.pid) return;
       if (isWindows) {
         spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], { shell: true });
@@ -164,10 +217,55 @@ export async function runTask(taskId: number, forcedProvider?: ProviderId): Prom
 
     child.on("close", (code) => {
       clearTimeout(timer);
-      finishTask(task, providerId, code, stdout, stderr, timedOut);
-      resolve();
+      resolve({ exitCode: code, timedOut: killedByTimeout });
     });
   });
+
+  const status = finishTask(task, providerId, exitCode, stdout, stderr, timedOut);
+  if (worktree) {
+    await deliver(task, providerId, worktree, status, stdout);
+  }
+}
+
+/** pós-execução da entrega por PR: commit/push/PR no sucesso, autópsia na falha */
+async function deliver(
+  task: TaskRow,
+  providerId: ProviderId,
+  worktree: PreparedWorktree,
+  status: "done" | "failed" | "pending",
+  stdout: string
+) {
+  if (status !== "done") {
+    appendLog(
+      task.id,
+      `[entrega] tarefa não concluída — worktree preservada para inspeção: ${worktree.worktreePath} (branch ${worktree.branch})`
+    );
+    emit({ type: "task", taskId: task.id, status });
+    return;
+  }
+
+  // anexos não fazem parte do trabalho — não devem entrar no PR
+  rmSync(join(worktree.worktreePath, "anexos"), { recursive: true, force: true });
+
+  const summary =
+    providerId === "claude"
+      ? parseClaudeEnvelope(stdout)?.result ?? null
+      : stdout.slice(-3000) || null;
+  const outcome = await deliverPullRequest(worktree, {
+    title: task.title,
+    body: buildPrBody(task, summary),
+  });
+  appendLog(task.id, outcome.notes.join("\n"));
+  db.prepare(
+    "UPDATE tasks SET deliver_status = ?, pr_url = COALESCE(?, pr_url) WHERE id = ?"
+  ).run(outcome.status, outcome.prUrl, task.id);
+  emit({ type: "task", taskId: task.id, status });
+}
+
+function appendLog(taskId: number, text: string) {
+  db.prepare(
+    "UPDATE tasks SET output_log = COALESCE(output_log, '') || ? WHERE id = ?"
+  ).run(`\n${text}`, taskId);
 }
 
 function finishTask(
@@ -177,7 +275,7 @@ function finishTask(
   stdout: string,
   stderr: string,
   timedOut: boolean
-) {
+): "done" | "failed" | "pending" {
   running.delete(providerId);
 
   let log = stdout + (stderr.trim() ? `\n[stderr]\n${stderr}` : "");
@@ -211,4 +309,5 @@ function finishTask(
     `UPDATE tasks SET status = ?, finished_at = datetime('now'), exit_code = ?, output_log = ? WHERE id = ?`
   ).run(status, exitCode, log.slice(0, MAX_LOG_BYTES), task.id);
   emit({ type: "task", taskId: task.id, status });
+  return status;
 }

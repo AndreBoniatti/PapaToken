@@ -285,6 +285,21 @@ export default function TaskDetail() {
           <Meta label="Iniciada">{fmtDate(task.started_at)}</Meta>
           <Meta label="Finalizada">{fmtDate(task.finished_at)}</Meta>
           <Meta label="Exit code">{task.exit_code ?? "—"}</Meta>
+          <Meta label="Entrega">
+            {task.deliver_mode !== "pr" ? (
+              "só executar"
+            ) : task.pr_url ? (
+              <a href={task.pr_url} target="_blank" rel="noreferrer">
+                Pull Request ↗
+              </a>
+            ) : task.deliver_status === "no_changes" ? (
+              "sem alterações — PR não criado"
+            ) : task.deliver_status === "failed" ? (
+              "entrega falhou — veja o log da execução"
+            ) : (
+              `PR pendente${task.base_branch ? ` (base: ${task.base_branch})` : ""}`
+            )}
+          </Meta>
           <div className="meta-item meta-wide">
             <span className="meta-label">Diretório de trabalho</span>
             <span className="meta-value mono">{task.cwd}</span>

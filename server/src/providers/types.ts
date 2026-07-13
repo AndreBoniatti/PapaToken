@@ -32,6 +32,14 @@ export interface TaskRow {
   effort: string | null;
   /** JSON array de nomes de arquivo salvos em <cwd>/anexos */
   attachments: string;
+  /** "pr": ao concluir, commit + push + PR no GitHub a partir de uma worktree */
+  deliver_mode: "none" | "pr";
+  /** branch de origem e alvo do PR; null = branch padrão do remote */
+  base_branch: string | null;
+  /** nome da branch de trabalho; null = template das configurações */
+  work_branch: string | null;
+  /** URL do PR aberto, quando houver */
+  pr_url: string | null;
 }
 
 export function parseAttachments(task: Pick<TaskRow, "attachments">): string[] {

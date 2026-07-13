@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, onServerEvent, PRIORITY_OPTIONS, priorityLabel, type Task } from "../api";
+import {
+  api,
+  onServerEvent,
+  PRIORITY_OPTIONS,
+  priorityLabel,
+  type GitDoctor,
+  type Task,
+} from "../api";
 import DirectoryPicker from "../components/DirectoryPicker";
 
 const emptyForm = {
@@ -11,6 +18,9 @@ const emptyForm = {
   priority: 0,
   model: "",
   effort: "",
+  deliver_mode: "none",
+  base_branch: "",
+  work_branch: "",
 };
 
 const MODEL_OPTIONS: Record<string, { value: string; label: string }[]> = {
@@ -39,6 +49,29 @@ export default function Tasks() {
   const [files, setFiles] = useState<File[]>([]);
   const [filePreview, setFilePreview] = useState<{ name: string; url: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [gitInfo, setGitInfo] = useState<{ repo: boolean; branches: string[] } | null>(null);
+  const [doctor, setDoctor] = useState<GitDoctor | null>(null);
+
+  // diagnóstico do ambiente de PR no momento em que o usuário liga a entrega
+  useEffect(() => {
+    if (form.deliver_mode !== "pr") return;
+    api.gitDoctor().then(setDoctor).catch(() => setDoctor(null));
+  }, [form.deliver_mode]);
+
+  // sugestões de branch quando a entrega por PR está ligada e há cwd
+  useEffect(() => {
+    if (form.deliver_mode !== "pr" || !form.cwd.trim()) {
+      setGitInfo(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      api
+        .gitBranches(form.cwd.trim())
+        .then(setGitInfo)
+        .catch(() => setGitInfo(null));
+    }, 400); // debounce da digitação do caminho
+    return () => clearTimeout(timer);
+  }, [form.deliver_mode, form.cwd]);
 
   const openFilePreview = (f: File) => {
     if (!f.type.startsWith("image/")) return;
@@ -226,6 +259,69 @@ export default function Tasks() {
                 </select>
               )}
             </div>
+            <div className="field">
+              <label>Entrega</label>
+              <select
+                value={form.deliver_mode}
+                onChange={(e) => setForm({ ...form, deliver_mode: e.target.value })}
+              >
+                <option value="none">Só executar</option>
+                <option value="pr">Abrir Pull Request no GitHub</option>
+              </select>
+              {form.deliver_mode === "pr" && doctor && (
+                <p style={{ margin: "6px 0 0", fontSize: "0.78rem" }}>
+                  {!doctor.git.installed ? (
+                    <>⚠ git não está instalado — instale o git antes de usar entrega por PR</>
+                  ) : !doctor.gh.installed ? (
+                    <>
+                      ⚠ GitHub CLI não instalado — Windows:{" "}
+                      <code>winget install GitHub.cli</code> · Linux: <code>apt install gh</code>
+                    </>
+                  ) : !doctor.gh.authenticated ? (
+                    <>
+                      ⚠ GitHub CLI sem login — rode <code>gh auth login</code> no terminal (uma
+                      única vez)
+                    </>
+                  ) : (
+                    <span className="muted">
+                      ✓ pronto para abrir PRs
+                      {doctor.gh.account ? ` — logado como ${doctor.gh.account}` : ""}
+                    </span>
+                  )}
+                </p>
+              )}
+            </div>
+            {form.deliver_mode === "pr" && (
+              <>
+                <div className="field">
+                  <label>Branch base (origem e alvo do PR)</label>
+                  <input
+                    list="git-branches"
+                    value={form.base_branch}
+                    onChange={(e) => setForm({ ...form, base_branch: e.target.value })}
+                    placeholder="vazio = branch padrão do repositório"
+                  />
+                  <datalist id="git-branches">
+                    {(gitInfo?.branches ?? []).map((b) => (
+                      <option key={b} value={b} />
+                    ))}
+                  </datalist>
+                  {gitInfo && !gitInfo.repo && (
+                    <p className="muted" style={{ margin: "4px 0 0", fontSize: "0.78rem" }}>
+                      ⚠ o diretório informado não parece ser um repositório git
+                    </p>
+                  )}
+                </div>
+                <div className="field">
+                  <label>Nome da branch nova</label>
+                  <input
+                    value={form.work_branch}
+                    onChange={(e) => setForm({ ...form, work_branch: e.target.value })}
+                    placeholder="vazio = template das Configurações"
+                  />
+                </div>
+              </>
+            )}
             <div className="field full">
               <label>Prompt (instrução completa para a IA)</label>
               <textarea
@@ -314,6 +410,7 @@ export default function Tasks() {
             <th>Status</th>
             <th>Criada</th>
             <th>Executada por</th>
+            <th>PR</th>
           </tr>
         </thead>
         <tbody>
@@ -332,11 +429,26 @@ export default function Tasks() {
               </td>
               <td className="muted">{new Date(t.created_at + "Z").toLocaleString("pt-BR")}</td>
               <td>{t.executed_by ?? "—"}</td>
+              <td>
+                {t.pr_url ? (
+                  <a href={t.pr_url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
+                    ↗
+                  </a>
+                ) : t.deliver_mode !== "pr" ? (
+                  <span className="muted">—</span>
+                ) : t.deliver_status === "no_changes" ? (
+                  <span className="muted" title="sem alterações — PR não criado">∅</span>
+                ) : t.deliver_status === "failed" ? (
+                  <span title="entrega falhou — veja o log da tarefa">⚠</span>
+                ) : (
+                  <span className="muted" title="entrega por PR configurada">git</span>
+                )}
+              </td>
             </tr>
           ))}
           {visible.length === 0 && (
             <tr>
-              <td colSpan={7} className="muted">
+              <td colSpan={8} className="muted">
                 Nenhuma tarefa {filter !== "all" ? `com status “${filter}”` : "cadastrada"}.
               </td>
             </tr>

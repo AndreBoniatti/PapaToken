@@ -17,6 +17,14 @@ antes que a janela resete e o saldo se perca.
 - **Execução**: `claude -p` (com `--permission-mode acceptEdits`) e
   `codex exec -s workspace-write`, headless, no diretório de trabalho da tarefa.
   O prompt vai por stdin. Concorrência de 1 tarefa por assinatura.
+- **Entrega por Pull Request** (opcional, por tarefa): o executor cria uma
+  `git worktree` temporária a partir de `origin/<base>` (branch base configurável;
+  padrão = a default do repo), a IA trabalha nela — o seu checkout fica intocado —
+  e, ao concluir, o PapaToken commita, faz push e abre o PR via `gh`, com o resumo
+  da IA no corpo. O nome da branch vem da tarefa ou do template das Configurações
+  (`feat/{slug}` por padrão; variáveis `{id}`, `{slug}`, `{date}`). Se a IA não
+  alterar nada, não há PR; se o push/PR falhar, o commit fica preservado na
+  worktree para inspeção.
 - **Scheduler** (tick de 60s), por assinatura:
   1. nunca despacha acima do **teto de segurança** (default 90%, janela 5h ou semanal);
   2. exige **sobra mínima** até o teto (default 15%);
@@ -46,9 +54,13 @@ npm test             # só os testes (Vitest, em server/test/)
 Os testes cobrem os pontos mais sujeitos a regressão: os **parsers dos providers**
 (com fixtures reais em `server/test/fixtures/` — se o formato do endpoint OAuth ou dos
 JSONL do Codex mudar, atualize as fixtures junto), o **algoritmo de despacho**
-(`decide()` em `scheduler.ts`, função pura com relógio injetável) e as **rotas da API**
-(via `app.inject()` do Fastify). Rodam com banco em memória (`PAPATOKEN_DB=:memory:`)
-e não tocam rede, CLIs nem o banco real.
+(`decide()` em `scheduler.ts`, função pura com relógio injetável), as **rotas da API**
+(via `app.inject()` do Fastify) e as **funções da entrega por PR** (`git.ts`).
+Rodam com banco em memória (`PAPATOKEN_DB=:memory:`) e não tocam rede, CLIs nem o
+banco real.
+
+O fluxo git completo (worktree → commit → push) tem um smoke manual contra um
+repositório local descartável: `cd server && npx tsx test/smoke-git.ts`.
 
 Iniciar junto com o sistema:
 - Windows: `powershell -ExecutionPolicy Bypass -File scripts\install-autostart.ps1`
@@ -60,6 +72,8 @@ Iniciar junto com o sistema:
 - `@anthropic-ai/claude-code` instalado e logado (`claude` → login com a assinatura)
 - `@openai/codex` instalado e logado (`codex login`) — sem isso o card do Codex mostra
   "sem dados" e tarefas designadas a ele ficam na fila
+- Para entrega por PR: `git` e o GitHub CLI (`gh`) logado (`gh auth login`) —
+  Windows: `winget install GitHub.cli`; Linux: `apt install gh` (ou equivalente)
 - Windows e Linux são suportados (macOS deve funcionar pelo caminho POSIX, não testado)
 
 ## Estrutura
@@ -70,6 +84,7 @@ server/src/
   providers/codex.ts    uso via JSONL de sessões + execução codex exec
   scheduler.ts          algoritmo de despacho (tick 60s)
   executor.ts           spawn headless, timeout, rate-limit, retries
+  git.ts                entrega por PR: worktree, branch, commit/push, gh pr create
   routes.ts             REST + SSE (/api/events)
   db.ts                 SQLite (node:sqlite) — server/data/papatoken.db
 web/src/pages/          Dashboard, Tarefas, Detalhe, Configurações

@@ -47,6 +47,13 @@ export interface Task {
   effort?: string | null;
   /** JSON array (string) com os nomes dos arquivos em <cwd>/anexos */
   attachments?: string;
+  /** "pr": ao concluir, abre Pull Request no GitHub */
+  deliver_mode?: "none" | "pr";
+  base_branch?: string | null;
+  work_branch?: string | null;
+  pr_url?: string | null;
+  /** desfecho da última entrega; null = ainda não entregou */
+  deliver_status?: "created" | "no_changes" | "failed" | null;
 }
 
 /** Níveis de prioridade da UI — o banco guarda o inteiro, então valores
@@ -86,6 +93,11 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+export interface GitDoctor {
+  git: { installed: boolean; version: string | null };
+  gh: { installed: boolean; authenticated: boolean; account: string | null };
+}
+
 export interface BrowseResult {
   path: string | null;
   parent: string | null;
@@ -99,6 +111,11 @@ export const api = {
   usage: () => request<UsageResponse>("/api/usage"),
   browse: (path?: string) =>
     request<BrowseResult>(`/api/fs/browse${path ? `?path=${encodeURIComponent(path)}` : ""}`),
+  gitBranches: (path: string) =>
+    request<{ repo: boolean; branches: string[] }>(
+      `/api/git/branches?path=${encodeURIComponent(path)}`
+    ),
+  gitDoctor: () => request<GitDoctor>("/api/git/doctor"),
   refreshUsage: () => request<{ ok: boolean }>("/api/usage/refresh", { method: "POST" }),
   tasks: () => request<Task[]>("/api/tasks"),
   task: (id: number | string) => request<Task>(`/api/tasks/${id}`),

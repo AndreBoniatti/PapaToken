@@ -53,7 +53,12 @@ db.exec(`
     max_attempts INTEGER NOT NULL DEFAULT 2,
     model TEXT,
     effort TEXT,
-    attachments TEXT NOT NULL DEFAULT '[]'
+    attachments TEXT NOT NULL DEFAULT '[]',
+    deliver_mode TEXT NOT NULL DEFAULT 'none' CHECK (deliver_mode IN ('none','pr')),
+    base_branch TEXT,
+    work_branch TEXT,
+    pr_url TEXT,
+    deliver_status TEXT CHECK (deliver_status IN ('created','no_changes','failed'))
   );
 
   CREATE TABLE IF NOT EXISTS settings (
@@ -62,12 +67,36 @@ db.exec(`
   );
 `);
 
-// migração para bancos criados antes das colunas model/effort/attachments
+// migração para bancos criados antes de colunas adicionadas depois do schema inicial
 const taskCols = db.prepare("PRAGMA table_info(tasks)").all() as { name: string }[];
-if (!taskCols.some((c) => c.name === "model")) db.exec("ALTER TABLE tasks ADD COLUMN model TEXT");
-if (!taskCols.some((c) => c.name === "effort")) db.exec("ALTER TABLE tasks ADD COLUMN effort TEXT");
-if (!taskCols.some((c) => c.name === "attachments")) {
-  db.exec("ALTER TABLE tasks ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'");
+const addColumn = (name: string, ddl: string) => {
+  if (!taskCols.some((c) => c.name === name)) db.exec(`ALTER TABLE tasks ADD COLUMN ${ddl}`);
+};
+addColumn("model", "model TEXT");
+addColumn("effort", "effort TEXT");
+addColumn("attachments", "attachments TEXT NOT NULL DEFAULT '[]'");
+addColumn("deliver_mode", "deliver_mode TEXT NOT NULL DEFAULT 'none' CHECK (deliver_mode IN ('none','pr'))");
+addColumn("base_branch", "base_branch TEXT");
+addColumn("work_branch", "work_branch TEXT");
+addColumn("pr_url", "pr_url TEXT");
+const hadDeliverStatus = taskCols.some((c) => c.name === "deliver_status");
+addColumn(
+  "deliver_status",
+  "deliver_status TEXT CHECK (deliver_status IN ('created','no_changes','failed'))"
+);
+if (!hadDeliverStatus) {
+  // backfill único: tarefas entregues antes da coluna existir têm o desfecho
+  // registrado apenas nas notas [entrega] do log
+  db.exec(`
+    UPDATE tasks SET deliver_status = 'created'
+      WHERE deliver_mode = 'pr' AND pr_url IS NOT NULL;
+    UPDATE tasks SET deliver_status = 'no_changes'
+      WHERE deliver_mode = 'pr' AND deliver_status IS NULL
+        AND output_log LIKE '%nenhuma alteração de arquivo%';
+    UPDATE tasks SET deliver_status = 'failed'
+      WHERE deliver_mode = 'pr' AND deliver_status IS NULL
+        AND output_log LIKE '%[entrega] FALHOU%';
+  `);
 }
 
 const defaultSettings: Record<string, string> = {
@@ -81,6 +110,8 @@ const defaultSettings: Record<string, string> = {
   // acceptEdits: só edita arquivos; bypassPermissions: usa qualquer ferramenta
   // (web, comandos) sem aprovação — necessário para tarefas autônomas
   claude_permission_mode: "acceptEdits",
+  // nome da branch criada em entregas por PR; variáveis: {id} {slug} {date}
+  branch_template: "feat/{slug}",
 };
 
 const insertSetting = db.prepare(

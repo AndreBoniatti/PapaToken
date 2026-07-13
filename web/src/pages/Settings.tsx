@@ -65,6 +65,12 @@ const FIELDS: {
     hint: "Tarefas criadas sem diretório de trabalho ganham uma subpasta própria aqui (tarefa-<id>).",
     type: "text",
   },
+  {
+    key: "branch_template",
+    label: "Template de branch (entrega por PR)",
+    hint: "Nome da branch criada quando a tarefa não informa um. Variáveis: {id} (número da tarefa), {slug} (título normalizado), {date} (AAAA-MM-DD). Ex.: feat/{slug}",
+    type: "text",
+  },
 ];
 
 export default function Settings() {
