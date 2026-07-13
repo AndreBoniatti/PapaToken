@@ -229,6 +229,31 @@ describe("verificação (portão de qualidade)", () => {
   });
 });
 
+describe("diretórios recentes", () => {
+  it("lista cwds distintos de tarefas, excluindo pastas inexistentes", async () => {
+    const fixture = (name: string) =>
+      new URL(`./fixtures/suggest/${name}`, import.meta.url).pathname.replace(/^\/(\w:)/, "$1");
+    const nodeRepo = fixture("node-repo");
+    const rustRepo = fixture("rust-repo");
+    const create = (cwd: string) =>
+      app.inject({
+        method: "POST",
+        url: "/api/tasks",
+        payload: { title: "recente", prompt: "p", cwd },
+      });
+    await create(nodeRepo);
+    await create(nodeRepo); // repetido — deve aparecer uma vez só
+    await create(rustRepo);
+    await create("C:\\caminho\\que\\nao\\existe");
+
+    const res = await app.inject({ method: "GET", url: "/api/fs/recent-dirs" });
+    const dirs = res.json().dirs as string[];
+    expect(dirs.filter((d) => d === nodeRepo)).toHaveLength(1);
+    expect(dirs).toContain(rustRepo);
+    expect(dirs).not.toContain("C:\\caminho\\que\\nao\\existe");
+  });
+});
+
 describe("diagnóstico de entrega", () => {
   it("GET /api/git/doctor responde o formato esperado", async () => {
     const res = await app.inject({ method: "GET", url: "/api/git/doctor" });

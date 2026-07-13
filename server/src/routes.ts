@@ -450,6 +450,22 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   // ---- navegador de diretórios (app local, single-user) ----
+  app.get("/api/fs/recent-dirs", async () => {
+    const managed = getSettings().default_workspace_dir ?? "";
+    const rows = db
+      .prepare(
+        `SELECT cwd, MAX(created_at) AS last_used FROM tasks
+         WHERE cwd <> '' GROUP BY cwd ORDER BY last_used DESC LIMIT 50`
+      )
+      .all() as { cwd: string }[];
+    const dirs = rows
+      .map((r) => r.cwd)
+      .filter((d) => !managed || !d.startsWith(managed)) // pastas tarefa-<id> não contam
+      .filter((d) => existsSync(d))
+      .slice(0, 8);
+    return { dirs };
+  });
+
   app.get("/api/fs/browse", async (req, reply) => {
     const q = ((req.query as { path?: string }).path ?? "").trim();
     const isWindows = process.platform === "win32";

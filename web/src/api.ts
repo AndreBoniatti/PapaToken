@@ -144,6 +144,7 @@ export const api = {
   usage: () => request<UsageResponse>("/api/usage"),
   browse: (path?: string) =>
     request<BrowseResult>(`/api/fs/browse${path ? `?path=${encodeURIComponent(path)}` : ""}`),
+  recentDirs: () => request<{ dirs: string[] }>("/api/fs/recent-dirs"),
   gitBranches: (path: string) =>
     request<{ repo: boolean; branches: string[] }>(
       `/api/git/branches?path=${encodeURIComponent(path)}`
