@@ -62,6 +62,8 @@ async function gitOk(args: string[], cwd: string): Promise<string> {
 // ---------- diagnóstico do ambiente de entrega ----------
 
 export interface GitDoctor {
+  /** plataforma do servidor — a UI escolhe o comando de instalação certo */
+  os: NodeJS.Platform;
   git: { installed: boolean; version: string | null };
   gh: { installed: boolean; authenticated: boolean; account: string | null };
 }
@@ -81,12 +83,17 @@ export function parseGhAuthStatus(output: string): {
 let doctorCache: { at: number; result: GitDoctor } | null = null;
 const DOCTOR_TTL_MS = 60_000; // gh auth status lê o keyring local — rápido e offline
 
-export async function gitDoctor(): Promise<GitDoctor> {
-  if (doctorCache && Date.now() - doctorCache.at < DOCTOR_TTL_MS) return doctorCache.result;
+export async function gitDoctor(force = false): Promise<GitDoctor> {
+  // force: usado pelo botão "verificar novamente" logo após o usuário instalar
+  // algo — não faz sentido devolver o cache velho nesse momento
+  if (!force && doctorCache && Date.now() - doctorCache.at < DOCTOR_TTL_MS) {
+    return doctorCache.result;
+  }
   const cwd = process.cwd();
   const gitV = await run("git", ["--version"], cwd);
   const auth = await runGh(["auth", "status"], cwd);
   const result: GitDoctor = {
+    os: process.platform,
     git: { installed: gitV.code === 0, version: gitV.stdout.trim() || null },
     gh:
       auth.code === null

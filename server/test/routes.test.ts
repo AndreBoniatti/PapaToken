@@ -260,9 +260,16 @@ describe("diagnóstico de entrega", () => {
     expect(res.statusCode).toBe(200);
     const d = res.json();
     // valores dependem da máquina — o contrato de formato é o que se trava aqui
+    expect(typeof d.os).toBe("string"); // a UI escolhe o comando de instalação por aqui
     expect(typeof d.git.installed).toBe("boolean");
     expect(typeof d.gh.installed).toBe("boolean");
     expect(typeof d.gh.authenticated).toBe("boolean");
+  });
+
+  it("GET /api/git/doctor?force=1 também responde o formato", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/git/doctor?force=1" });
+    expect(res.statusCode).toBe(200);
+    expect(typeof res.json().os).toBe("string");
   });
 });
 

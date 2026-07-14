@@ -404,7 +404,10 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   // ---- git (diagnóstico e sugestões para o formulário de entrega por PR) ----
-  app.get("/api/git/doctor", async () => gitDoctor());
+  app.get("/api/git/doctor", async (req) => {
+    const force = (req.query as { force?: string }).force === "1";
+    return gitDoctor(force);
+  });
 
   app.get("/api/git/branches", async (req, reply) => {
     const path = ((req.query as { path?: string }).path ?? "").trim();

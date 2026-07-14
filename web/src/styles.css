@@ -145,6 +145,40 @@ tr:hover td { background: var(--panel-2); }
   white-space: nowrap;
 }
 .form-section > .form-grid { padding: 2px 14px 14px; }
+
+/* checklist de preparação para abrir PR */
+.setup-ready { margin: 8px 0 0; font-size: 0.8rem; color: var(--ok); }
+.setup-checklist {
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--panel-2);
+}
+.setup-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.8rem;
+  margin-bottom: 8px;
+}
+.setup-head button { font-size: 0.75rem; padding: 4px 10px; }
+.setup-checklist ul { list-style: none; margin: 0; padding: 0; }
+.setup-step {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 0.82rem;
+  padding: 3px 0;
+}
+.setup-icon { width: 1em; font-weight: 700; }
+.setup-step.step-done { color: var(--ok); }
+.setup-step.step-done .setup-icon { color: var(--ok); }
+.setup-step.step-todo .setup-icon { color: var(--warn); }
+.setup-step.step-pending { color: var(--muted); }
+.setup-step code { font-size: 0.78rem; }
+.setup-foot { margin: 8px 0 0; font-size: 0.72rem; }
 .field label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 5px; }
 .field input, .field select, .field textarea { width: 100%; }
 textarea { min-height: 90px; resize: vertical; }

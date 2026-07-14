@@ -42,6 +42,92 @@ const EFFORT_OPTIONS: Record<string, string[]> = {
   codex: ["minimal", "low", "medium", "high", "xhigh"],
 };
 
+function ghInstallCmd(os: string): string {
+  if (os === "win32") return "winget install GitHub.cli";
+  if (os === "darwin") return "brew install gh";
+  return "sudo apt install gh"; // demais Linux/distros: o gerenciador equivalente
+}
+
+/** Passo do checklist de preparação de PR: ✓ feito, ● falta agora, ○ aguardando pré-requisito. */
+function SetupStep({
+  state,
+  label,
+  command,
+}: {
+  state: "done" | "todo" | "pending";
+  label: string;
+  command?: string;
+}) {
+  const icon = state === "done" ? "✓" : state === "todo" ? "●" : "○";
+  const cls = state === "done" ? "step-done" : state === "todo" ? "step-todo" : "step-pending";
+  return (
+    <li className={`setup-step ${cls}`}>
+      <span className="setup-icon">{icon}</span>
+      <span>
+        {label}
+        {command && state !== "done" && (
+          <>
+            {" — "}
+            <code>{command}</code>
+          </>
+        )}
+      </span>
+    </li>
+  );
+}
+
+function PrReadiness({
+  doctor,
+  checking,
+  onRecheck,
+}: {
+  doctor: GitDoctor;
+  checking: boolean;
+  onRecheck: () => void;
+}) {
+  const ready = doctor.git.installed && doctor.gh.installed && doctor.gh.authenticated;
+  if (ready) {
+    return (
+      <p className="setup-ready">
+        ✓ pronto para abrir PRs{doctor.gh.account ? ` — logado como ${doctor.gh.account}` : ""}
+      </p>
+    );
+  }
+  return (
+    <div className="setup-checklist">
+      <div className="setup-head">
+        <span>Para abrir PRs, complete o que falta:</span>
+        <button type="button" onClick={onRecheck} disabled={checking}>
+          {checking ? "verificando…" : "↻ Verificar de novo"}
+        </button>
+      </div>
+      <ul>
+        <SetupStep
+          state={doctor.git.installed ? "done" : "todo"}
+          label="git instalado"
+          command="instale o git"
+        />
+        <SetupStep
+          state={doctor.gh.installed ? "done" : "todo"}
+          label="GitHub CLI (gh) instalado"
+          command={ghInstallCmd(doctor.os)}
+        />
+        <SetupStep
+          state={
+            doctor.gh.authenticated ? "done" : doctor.gh.installed ? "todo" : "pending"
+          }
+          label="login no GitHub feito"
+          command="gh auth login"
+        />
+      </ul>
+      <p className="setup-foot muted">
+        Já rodou os comandos? Ao voltar para esta janela o checklist se atualiza sozinho — ou clique
+        em “Verificar de novo”. Se instalou o gh agora, reinicie o servidor do PapaToken.
+      </p>
+    </div>
+  );
+}
+
 export default function Tasks() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [filter, setFilter] = useState<string>("all");
@@ -53,13 +139,28 @@ export default function Tasks() {
   const [error, setError] = useState<string | null>(null);
   const [gitInfo, setGitInfo] = useState<{ repo: boolean; branches: string[] } | null>(null);
   const [doctor, setDoctor] = useState<GitDoctor | null>(null);
+  const [doctorChecking, setDoctorChecking] = useState(false);
   const [verifySuggestions, setVerifySuggestions] = useState<string[]>([]);
 
-  // diagnóstico do ambiente de PR no momento em que o usuário liga a entrega
+  const loadDoctor = useCallback((force?: boolean) => {
+    setDoctorChecking(true);
+    api
+      .gitDoctor(force)
+      .then(setDoctor)
+      .catch(() => setDoctor(null))
+      .finally(() => setDoctorChecking(false));
+  }, []);
+
+  // diagnóstico do ambiente de PR quando o usuário liga a entrega; e de novo,
+  // sem cache, sempre que a janela recebe foco — cobre o fluxo "li o comando,
+  // fui ao terminal instalar/logar e voltei": o checklist se atualiza sozinho
   useEffect(() => {
     if (form.deliver_mode !== "pr") return;
-    api.gitDoctor().then(setDoctor).catch(() => setDoctor(null));
-  }, [form.deliver_mode]);
+    loadDoctor();
+    const onFocus = () => loadDoctor(true);
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [form.deliver_mode, loadDoctor]);
 
   // sugestões + memória do comando de verificação para o diretório escolhido
   useEffect(() => {
@@ -395,26 +496,7 @@ export default function Tasks() {
                 <option value="pr">Abrir Pull Request no GitHub</option>
               </select>
               {form.deliver_mode === "pr" && doctor && (
-                <p style={{ margin: "6px 0 0", fontSize: "0.78rem" }}>
-                  {!doctor.git.installed ? (
-                    <>⚠ git não está instalado — instale o git antes de usar entrega por PR</>
-                  ) : !doctor.gh.installed ? (
-                    <>
-                      ⚠ GitHub CLI não instalado — Windows:{" "}
-                      <code>winget install GitHub.cli</code> · Linux: <code>apt install gh</code>
-                    </>
-                  ) : !doctor.gh.authenticated ? (
-                    <>
-                      ⚠ GitHub CLI sem login — rode <code>gh auth login</code> no terminal (uma
-                      única vez)
-                    </>
-                  ) : (
-                    <span className="muted">
-                      ✓ pronto para abrir PRs
-                      {doctor.gh.account ? ` — logado como ${doctor.gh.account}` : ""}
-                    </span>
-                  )}
-                </p>
+                <PrReadiness doctor={doctor} checking={doctorChecking} onRecheck={() => loadDoctor(true)} />
               )}
             </div>
             {form.deliver_mode === "pr" && (

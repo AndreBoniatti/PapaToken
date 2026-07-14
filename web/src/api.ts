@@ -127,6 +127,8 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export interface GitDoctor {
+  /** plataforma do servidor: "win32" | "linux" | "darwin" | … */
+  os: string;
   git: { installed: boolean; version: string | null };
   gh: { installed: boolean; authenticated: boolean; account: string | null };
 }
@@ -149,7 +151,8 @@ export const api = {
     request<{ repo: boolean; branches: string[] }>(
       `/api/git/branches?path=${encodeURIComponent(path)}`
     ),
-  gitDoctor: () => request<GitDoctor>("/api/git/doctor"),
+  gitDoctor: (force?: boolean) =>
+    request<GitDoctor>(`/api/git/doctor${force ? "?force=1" : ""}`),
   verifyInfo: (path: string) =>
     request<{ remembered: string | null; suggestions: string[] }>(
       `/api/verify/info?path=${encodeURIComponent(path)}`
