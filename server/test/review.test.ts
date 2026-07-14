@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { extractReviewComments, parsePrUrl } from "../src/git.js";
-import { buildReviewPrompt } from "../src/executor.js";
+import { buildPrReviewPrompt, buildReviewPrompt } from "../src/executor.js";
 
 describe("parsePrUrl", () => {
   it("extrai owner/repo/número de URLs de PR", () => {
@@ -50,6 +50,40 @@ describe("extractReviewComments", () => {
 
   it("sem data de corte, inclui tudo que tem corpo", () => {
     expect(extractReviewComments(pr, inline, null)).toHaveLength(4);
+  });
+});
+
+describe("buildPrReviewPrompt (tarefa de code review)", () => {
+  const pr = {
+    title: "Adiciona validação de login",
+    body: "Corrige o bug #12",
+    author: "fulano",
+    headRefName: "fix/login",
+    baseRefName: "main",
+    changedFiles: 3,
+    additions: 40,
+    deletions: 5,
+    diff: "diff --git a/src/login.ts b/src/login.ts\n+if (!user) throw new Error();",
+  };
+
+  it("inclui contexto do PR, diff, instruções extras e o template de saída", () => {
+    const prompt = buildPrReviewPrompt({ prompt: "foque em segurança" }, pr);
+    expect(prompt).toContain("Adiciona validação de login");
+    expect(prompt).toContain("@fulano");
+    expect(prompt).toContain("main ← fix/login");
+    expect(prompt).toContain("foque em segurança");
+    expect(prompt).toContain("diff --git a/src/login.ts");
+    expect(prompt).toContain("## Resumo");
+    expect(prompt).toContain("## Problemas");
+    expect(prompt).toContain("NÃO modifique nenhum arquivo");
+    expect(prompt).toContain("decisão é humana");
+  });
+
+  it("sem instruções extras usa '(nenhuma)' e trunca diffs gigantes", () => {
+    expect(buildPrReviewPrompt({ prompt: "" }, pr)).toContain("(nenhuma)");
+    const gigante = buildPrReviewPrompt({ prompt: "" }, { ...pr, diff: "x".repeat(200_000) });
+    expect(gigante).toContain("diff truncado");
+    expect(gigante.length).toBeLessThan(100_000);
   });
 });
 

@@ -58,6 +58,13 @@ describe("buildCommand honra o codex_sandbox_mode", () => {
     expect(s).toContain("-s workspace-write");
     expect(s).toContain("sandbox_workspace_write.network_access=true");
   });
+
+  it("review de PR: sempre read-only, mesmo com danger-full-access configurado", () => {
+    setSetting("codex_sandbox_mode", "danger-full-access");
+    const review = { ...task, kind: "pr_review" } as TaskRow;
+    const { args } = codexProvider.buildCommand(review);
+    expect(args.join(" ")).toContain("-s read-only");
+  });
 });
 
 describe("leitura de uso do Codex a partir dos JSONL de sessão", () => {

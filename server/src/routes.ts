@@ -13,7 +13,7 @@ import { homedir } from "node:os";
 import { db, getSettings, setSetting } from "./db.js";
 import { bus } from "./events.js";
 import { blockedInfo, isRunning, runTask, startReview } from "./executor.js";
-import { gitDoctor, isValidBranchName, listRemoteBranches } from "./git.js";
+import { gitDoctor, isValidBranchName, listRemoteBranches, parsePrUrl } from "./git.js";
 import { suggestVerifyCommands } from "./verify.js";
 import { evaluate, latestUsage, refreshUsage } from "./scheduler.js";
 import { parseAttachments } from "./providers/types.js";
@@ -138,7 +138,7 @@ export async function registerRoutes(app: FastifyInstance) {
       .prepare(
         `SELECT id, title, provider, cwd, priority, status, created_at, started_at,
                 finished_at, executed_by, exit_code, attempts, max_attempts,
-                deliver_mode, deliver_status, pr_url, cost_usd
+                deliver_mode, deliver_status, pr_url, cost_usd, kind
          FROM tasks ORDER BY
            CASE status WHEN 'running' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END,
            -- fila (running/pending): mesma ordem que o despacho usa (nextTask)
@@ -172,9 +172,25 @@ export async function registerRoutes(app: FastifyInstance) {
       base_branch?: string;
       work_branch?: string;
       verify_cmd?: string;
+      kind?: string;
+      pr_url?: string;
     };
-    if (!body.title || !body.prompt) {
+    const kind = body.kind === "pr_review" ? "pr_review" : "exec";
+    // review de PR: o prompt são instruções extras ao revisor — opcional
+    if (!body.title || (kind === "exec" && !body.prompt)) {
       return reply.code(400).send({ error: "title e prompt são obrigatórios" });
+    }
+    if (kind === "pr_review") {
+      if (!body.pr_url || !parsePrUrl(body.pr_url)) {
+        return reply
+          .code(400)
+          .send({ error: "review de PR exige uma URL válida (https://github.com/dono/repo/pull/N)" });
+      }
+      if (!(body.cwd ?? "").trim()) {
+        return reply
+          .code(400)
+          .send({ error: "review de PR exige o clone local do repositório (diretório de trabalho)" });
+      }
     }
     const invalid =
       invalidModelEffort(body.model, body.effort) ??
@@ -195,12 +211,12 @@ export async function registerRoutes(app: FastifyInstance) {
     const result = db
       .prepare(
         `INSERT INTO tasks (title, prompt, provider, cwd, priority, max_attempts, model, effort,
-                            deliver_mode, base_branch, work_branch, verify_cmd)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                            deliver_mode, base_branch, work_branch, verify_cmd, kind, pr_url)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         body.title,
-        body.prompt,
+        body.prompt ?? "",
         provider,
         cwd,
         body.priority ?? 0,
@@ -210,7 +226,9 @@ export async function registerRoutes(app: FastifyInstance) {
         deliverMode,
         body.base_branch?.trim() || null,
         body.work_branch?.trim() || null,
-        verifyCmd
+        verifyCmd,
+        kind,
+        kind === "pr_review" ? body.pr_url!.trim() : null
       );
     rememberVerifyCmd(cwd, verifyCmd);
     const id = result.lastInsertRowid as number;

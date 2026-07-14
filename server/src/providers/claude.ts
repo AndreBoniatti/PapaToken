@@ -133,7 +133,9 @@ export const claudeProvider: Provider = {
 
   buildCommand(task: TaskRow) {
     // Prompt is delivered via stdin (see executor) to avoid shell-quoting issues.
+    // Review de PR é leitura pura — acceptEdits basta, mesmo com bypass configurado.
     const autonomous =
+      task.kind !== "pr_review" &&
       getSettings().claude_permission_mode === "bypassPermissions";
     const args = ["-p", "--output-format", "json"];
     args.push(

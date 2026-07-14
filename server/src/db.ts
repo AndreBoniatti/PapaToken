@@ -62,7 +62,8 @@ db.exec(`
     verify_cmd TEXT,
     cost_usd REAL,
     tokens_in INTEGER,
-    tokens_out INTEGER
+    tokens_out INTEGER,
+    kind TEXT NOT NULL DEFAULT 'exec' CHECK (kind IN ('exec','pr_review'))
   );
 
   CREATE TABLE IF NOT EXISTS settings (
@@ -93,6 +94,7 @@ addColumn("verify_cmd", "verify_cmd TEXT");
 addColumn("cost_usd", "cost_usd REAL");
 addColumn("tokens_in", "tokens_in INTEGER");
 addColumn("tokens_out", "tokens_out INTEGER");
+addColumn("kind", "kind TEXT NOT NULL DEFAULT 'exec' CHECK (kind IN ('exec','pr_review'))");
 const hadDeliverStatus = taskCols.some((c) => c.name === "deliver_status");
 addColumn(
   "deliver_status",

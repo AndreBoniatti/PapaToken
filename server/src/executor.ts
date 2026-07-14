@@ -7,14 +7,17 @@ import {
   buildPrBody,
   deliverPullRequest,
   deliveryBlocker,
+  fetchPrForReview,
   fetchReviewFeedback,
   isValidBranchName,
+  postPrComment,
   prepareReviewWorktree,
   prepareWorktree,
+  removeWorktree,
   renderBranchTemplate,
+  run,
 } from "./git.js";
-import { run } from "./git.js";
-import type { PreparedWorktree, ReviewComment } from "./git.js";
+import type { PreparedWorktree, PrOverview, ReviewComment } from "./git.js";
 import { parseCodexTokens } from "./providers/codex.js";
 import { getProvider } from "./providers/index.js";
 import { parseAttachments } from "./providers/types.js";
@@ -120,6 +123,38 @@ export function buildReviewPrompt(
     `[Comentários do review]\n${list}\n\n` +
     `A branch do PR já está ativa neste diretório. Faça as alterações pedidas nos comentários — ` +
     `elas serão commitadas e enviadas automaticamente ao mesmo PR. Não rode git commit/push você mesmo.`
+  );
+}
+
+const MAX_DIFF_CHARS = 80_000;
+
+/** Prompt da tarefa de code review: diff + contexto do PR + template de saída. */
+export function buildPrReviewPrompt(
+  task: Pick<TaskRow, "prompt">,
+  pr: PrOverview
+): string {
+  const diff =
+    pr.diff.length > MAX_DIFF_CHARS
+      ? `${pr.diff.slice(0, MAX_DIFF_CHARS)}\n\n[... diff truncado em ${MAX_DIFF_CHARS} caracteres — abra os arquivos no diretório para ver o restante]`
+      : pr.diff;
+  const extras = task.prompt?.trim() || "(nenhuma)";
+  return (
+    `Você é um revisor de código experiente. Faça o code review do Pull Request abaixo.\n` +
+    `O código do PR já está checkado neste diretório (branch ${pr.headRefName}) — abra os arquivos ` +
+    `que precisar para entender o contexto além do diff. NÃO modifique nenhum arquivo; ` +
+    `sua única saída é o texto do review, em Markdown.\n\n` +
+    `[Pull Request]\nTítulo: ${pr.title}\nAutor: @${pr.author}\n` +
+    `Branches: ${pr.baseRefName} ← ${pr.headRefName}\n` +
+    `Alterações: ${pr.changedFiles} arquivo(s), +${pr.additions}/-${pr.deletions}\n` +
+    `Descrição:\n${pr.body.trim() || "(sem descrição)"}\n\n` +
+    `[Instruções extras do solicitante]\n${extras}\n\n` +
+    `[Diff]\n${diff}\n\n` +
+    `[Formato da resposta — siga exatamente]\n` +
+    `## Resumo\n(2 a 4 frases: o que o PR faz e sua avaliação geral)\n\n` +
+    `## Problemas\n(lista por severidade — 🔴 crítico, 🟡 atenção, 🔵 sugestão — cada item com \`arquivo:linha\` ` +
+    `e explicação; se não encontrar problemas, diga explicitamente)\n\n` +
+    `## Sugestões\n(melhorias opcionais, se houver)\n\n` +
+    `Não inclua veredito de aprovação/reprovação — essa decisão é humana.`
   );
 }
 
@@ -260,6 +295,12 @@ export async function runTask(taskId: number, forcedProvider?: ProviderId): Prom
 
   const settings = getSettings();
   const timeoutMs = Number(settings.task_timeout_min ?? "30") * 60_000;
+
+  if (task.kind === "pr_review") {
+    await runPrReview(task, providerId, provider, settings, timeoutMs);
+    return;
+  }
+
   const { cmd, args } = provider.buildCommand(task);
 
   // Entrega por PR: worktree preparada antes de marcar como running — falha
@@ -509,6 +550,82 @@ function runSucceeded(providerId: ProviderId, run: RunOutcome): boolean {
   if (run.timedOut) return false;
   const envelope = providerId === "claude" ? parseClaudeEnvelope(run.stdout) : null;
   return envelope ? envelope.is_error === false : run.exitCode === 0;
+}
+
+/**
+ * Tarefa de code review de um PR alheio: worktree na branch do PR (leitura),
+ * a IA produz o review em Markdown e o resultado vira comentário no PR.
+ * Nunca commita/pusha nada — a worktree é descartada no fim.
+ */
+async function runPrReview(
+  task: TaskRow,
+  providerId: ProviderId,
+  provider: Provider,
+  settings: Record<string, string>,
+  timeoutMs: number
+): Promise<void> {
+  let worktree: PreparedWorktree | null = null;
+  let pr: PrOverview;
+  try {
+    if (!task.pr_url) throw new Error("tarefa de review sem URL de PR");
+    if (!task.cwd) throw new Error("review de PR exige o clone local do repositório");
+    const blocker = await deliveryBlocker();
+    if (blocker) throw new Error(blocker);
+    pr = await fetchPrForReview(task.cwd, task.pr_url);
+    worktree = await prepareReviewWorktree({
+      repoPath: task.cwd,
+      branch: pr.headRefName,
+      baseBranch: pr.baseRefName,
+      worktreesDir: join(settings.default_workspace_dir, "worktrees"),
+      taskId: task.id,
+    });
+  } catch (err) {
+    db.prepare("UPDATE tasks SET status = 'failed', output_log = ? WHERE id = ?").run(
+      `[review-pr] preparação falhou: ${(err as Error).message}`,
+      task.id
+    );
+    emit({ type: "task", taskId: task.id, status: "failed" });
+    return;
+  }
+
+  running.set(providerId, task.id);
+  db.prepare(
+    "UPDATE tasks SET status = 'running', started_at = datetime('now'), executed_by = ?, attempts = attempts + 1 WHERE id = ?"
+  ).run(providerId, task.id);
+  emit({ type: "task", taskId: task.id, status: "running" });
+
+  const { cmd, args } = provider.buildCommand(task);
+  const result = await executeWithVerification(
+    task,
+    providerId,
+    [cmd, ...args].join(" "),
+    buildPrReviewPrompt(task, pr),
+    worktree.worktreePath,
+    timeoutMs
+  );
+  const status = finishTask(task, providerId, result);
+
+  if (status === "done") {
+    const review =
+      providerId === "claude"
+        ? parseClaudeEnvelope(result.stdout)?.result ?? result.stdout.trim()
+        : result.stdout.trim();
+    const body = `${review}\n\n---\n🤖 Review automático — 🟡 PapaToken`;
+    try {
+      const commentUrl = await postPrComment(task.cwd, task.pr_url!, body);
+      appendLog(
+        task.id,
+        `[review-pr] comentário publicado no PR: ${commentUrl ?? task.pr_url}`
+      );
+    } catch (err) {
+      appendLog(
+        task.id,
+        `[review-pr] o review foi gerado (acima), mas FALHOU ao comentar no PR: ${(err as Error).message}`
+      );
+    }
+    emit({ type: "task", taskId: task.id, status });
+  }
+  await removeWorktree(worktree);
 }
 
 /**

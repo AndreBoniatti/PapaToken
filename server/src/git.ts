@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 export interface CmdResult {
@@ -328,6 +329,97 @@ export async function fetchReviewFeedback(
     );
   }
   return { branch: pr.headRefName, baseBranch: pr.baseRefName ?? "main", comments };
+}
+
+export interface PrOverview {
+  title: string;
+  body: string;
+  author: string;
+  headRefName: string;
+  baseRefName: string;
+  changedFiles: number;
+  additions: number;
+  deletions: number;
+  diff: string;
+}
+
+/** Busca título/descrição/branches + diff completo de um PR aberto (tarefas de review). */
+export async function fetchPrForReview(
+  repoPath: string,
+  prUrl: string
+): Promise<PrOverview> {
+  if (!parsePrUrl(prUrl)) throw new Error(`URL de PR não reconhecida: ${prUrl}`);
+
+  const view = await runGh(
+    [
+      "pr",
+      "view",
+      prUrl,
+      "--json",
+      "title,body,state,author,headRefName,baseRefName,changedFiles,additions,deletions",
+    ],
+    repoPath
+  );
+  if (view.code !== 0) {
+    throw new Error(humanizeDeliveryError(`gh pr view: ${(view.stderr || view.stdout).trim()}`));
+  }
+  const pr = JSON.parse(view.stdout) as {
+    title?: string;
+    body?: string;
+    state?: string;
+    author?: { login?: string };
+    headRefName?: string;
+    baseRefName?: string;
+    changedFiles?: number;
+    additions?: number;
+    deletions?: number;
+  };
+  if (pr.state !== "OPEN") {
+    throw new Error(`o PR não está aberto (estado: ${pr.state ?? "desconhecido"})`);
+  }
+  if (!pr.headRefName) throw new Error("não foi possível identificar a branch do PR");
+
+  const diff = await runGh(["pr", "diff", prUrl], repoPath);
+  if (diff.code !== 0) {
+    throw new Error(humanizeDeliveryError(`gh pr diff: ${(diff.stderr || diff.stdout).trim()}`));
+  }
+
+  return {
+    title: pr.title ?? "(sem título)",
+    body: pr.body ?? "",
+    author: pr.author?.login ?? "?",
+    headRefName: pr.headRefName,
+    baseRefName: pr.baseRefName ?? "main",
+    changedFiles: pr.changedFiles ?? 0,
+    additions: pr.additions ?? 0,
+    deletions: pr.deletions ?? 0,
+    diff: diff.stdout,
+  };
+}
+
+/**
+ * Publica um comentário no PR. O corpo vai por arquivo temporário (--body-file)
+ * — reviews são longos demais para a linha de comando do Windows.
+ * Retorna a URL do comentário quando o gh a informa.
+ */
+export async function postPrComment(
+  repoPath: string,
+  prUrl: string,
+  body: string
+): Promise<string | null> {
+  const tmp = join(tmpdir(), `papatoken-review-${Date.now()}.md`);
+  writeFileSync(tmp, body, "utf8");
+  try {
+    const r = await runGh(["pr", "comment", prUrl, "--body-file", tmp], repoPath);
+    if (r.code !== 0) {
+      throw new Error(
+        humanizeDeliveryError(`gh pr comment: ${(r.stderr || r.stdout).trim()}`)
+      );
+    }
+    return (r.stdout + r.stderr).match(/https:\/\/\S+#issuecomment-\d+|https:\/\/\S+/)?.[0] ?? null;
+  } finally {
+    rmSync(tmp, { force: true });
+  }
 }
 
 /**

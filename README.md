@@ -30,6 +30,12 @@ antes que a janela resete e o saldo se perca.
   devolvida à IA para **uma** rodada de correção e a verificação roda de novo;
   persistindo a falha, a tarefa é marcada como falha (sem PR). O formulário
   sugere comandos detectados no repositório e lembra o último usado por repo.
+- **Tarefa de code review**: o tipo "Revisar Pull Request" recebe a URL de um
+  PR aberto (e o clone local do repo), checa a branch numa worktree de leitura,
+  a IA revisa o diff com acesso ao código para contexto e o resultado é
+  publicado como **comentário no PR** (resumo, problemas por severidade com
+  `arquivo:linha`, sugestões — nunca approve/request-changes: o veredito é
+  humano). Nada é commitado; no Codex roda em sandbox `read-only`.
 - **Ciclo de review**: quando o PR de uma tarefa recebe comentários, o botão
   "Atender review" (no detalhe da tarefa) lê os comentários novos — posteriores
   ao último push — via `gh`, re-executa a IA na branch do PR em worktree própria

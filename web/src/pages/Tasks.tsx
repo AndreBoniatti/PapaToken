@@ -12,10 +12,12 @@ import {
 import DirectoryPicker from "../components/DirectoryPicker";
 
 const emptyForm = {
+  kind: "exec",
   title: "",
   prompt: "",
   provider: "any",
   cwd: "",
+  pr_url: "",
   priority: 0,
   model: "",
   effort: "",
@@ -310,15 +312,43 @@ export default function Tasks() {
           <h2>Nova tarefa</h2>
           <div className="form-grid">
             <div className="field">
+              <label>Tipo de tarefa</label>
+              <select
+                value={form.kind}
+                onChange={(e) =>
+                  setForm({ ...form, kind: e.target.value, deliver_mode: "none" })
+                }
+              >
+                <option value="exec">Executar instrução</option>
+                <option value="pr_review">Revisar Pull Request</option>
+              </select>
+            </div>
+            <div className="field">
               <label>Título</label>
               <input
                 value={form.title}
                 onChange={(e) => setForm({ ...form, title: e.target.value })}
-                placeholder="Ex.: Escrever testes do módulo X"
+                placeholder={
+                  form.kind === "pr_review" ? "Ex.: Review do PR #42" : "Ex.: Escrever testes do módulo X"
+                }
               />
             </div>
+            {form.kind === "pr_review" && (
+              <div className="field full">
+                <label>URL do Pull Request</label>
+                <input
+                  value={form.pr_url}
+                  onChange={(e) => setForm({ ...form, pr_url: e.target.value })}
+                  placeholder="https://github.com/dono/repo/pull/42"
+                />
+              </div>
+            )}
             <div className="field">
-              <label>Diretório de trabalho (opcional)</label>
+              <label>
+                {form.kind === "pr_review"
+                  ? "Clone local do repositório (obrigatório)"
+                  : "Diretório de trabalho (opcional)"}
+              </label>
               <div className="input-with-button">
                 <input
                   value={form.cwd}
@@ -331,14 +361,23 @@ export default function Tasks() {
               </div>
             </div>
             <div className="field full">
-              <label>Prompt (instrução completa para a IA)</label>
+              <label>
+                {form.kind === "pr_review"
+                  ? "Instruções ao revisor (opcional)"
+                  : "Prompt (instrução completa para a IA)"}
+              </label>
               <textarea
                 value={form.prompt}
                 onChange={(e) => setForm({ ...form, prompt: e.target.value })}
                 onPaste={pasteImages}
-                placeholder="Descreva a tarefa com contexto suficiente para execução autônoma… (Ctrl+V cola prints como anexo)"
+                placeholder={
+                  form.kind === "pr_review"
+                    ? "Ex.: foque em segurança e concorrência; o padrão do time é X…"
+                    : "Descreva a tarefa com contexto suficiente para execução autônoma… (Ctrl+V cola prints como anexo)"
+                }
               />
             </div>
+            {form.kind !== "pr_review" && (
             <div className="field full">
               <label>Anexos (opcional — prints podem ser colados com Ctrl+V no prompt)</label>
               <input
@@ -376,6 +415,7 @@ export default function Tasks() {
                 </div>
               )}
             </div>
+            )}
           </div>
 
           <details className="form-section">
@@ -466,6 +506,7 @@ export default function Tasks() {
             </div>
           </details>
 
+          {form.kind !== "pr_review" && (
           <details className="form-section">
             <summary>
               <strong>Qualidade e entrega</strong>
@@ -532,6 +573,7 @@ export default function Tasks() {
             )}
             </div>
           </details>
+          )}
 
           <div className="toolbar mt">
             <button className="primary" onClick={() => void submit()}>

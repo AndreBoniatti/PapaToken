@@ -117,6 +117,42 @@ describe("rotas de tarefas", () => {
     expect(res.json().error).toContain("não tem PR");
   });
 
+  it("valida tarefas de review de PR (URL válida + clone local; prompt opcional)", async () => {
+    const post = (payload: Record<string, unknown>) =>
+      app.inject({ method: "POST", url: "/api/tasks", payload });
+
+    const semUrl = await post({ title: "r", kind: "pr_review", cwd: "C:\\repo" });
+    expect(semUrl.statusCode).toBe(400);
+
+    const urlRuim = await post({
+      title: "r",
+      kind: "pr_review",
+      cwd: "C:\\repo",
+      pr_url: "https://github.com/a/b",
+    });
+    expect(urlRuim.statusCode).toBe(400);
+
+    const semClone = await post({
+      title: "r",
+      kind: "pr_review",
+      pr_url: "https://github.com/a/b/pull/7",
+    });
+    expect(semClone.statusCode).toBe(400);
+
+    const ok = await post({
+      title: "Review do PR 7",
+      kind: "pr_review",
+      cwd: "C:\\repo",
+      pr_url: "https://github.com/a/b/pull/7",
+    });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toMatchObject({
+      kind: "pr_review",
+      pr_url: "https://github.com/a/b/pull/7",
+      prompt: "",
+    });
+  });
+
   it("valida os campos de entrega por PR", async () => {
     const semCwd = await app.inject({
       method: "POST",

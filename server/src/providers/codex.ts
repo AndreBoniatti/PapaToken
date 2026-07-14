@@ -204,10 +204,14 @@ export const codexProvider: Provider = {
     // - workspace-write: edita o cwd + rede (mas no Windows vira read-only);
     // - danger-full-access: sem sandbox, roda qualquer comando (necessário no
     //   Windows para escrever arquivo; equivale ao bypassPermissions do Claude).
+    // Tarefas de review de PR são leitura pura — read-only sempre (funciona
+    // inclusive no Windows e é o modo mais seguro).
     const mode =
-      getSettings().codex_sandbox_mode === "danger-full-access"
-        ? "danger-full-access"
-        : "workspace-write";
+      task.kind === "pr_review"
+        ? "read-only"
+        : getSettings().codex_sandbox_mode === "danger-full-access"
+          ? "danger-full-access"
+          : "workspace-write";
     const args = ["exec", "-s", mode];
     if (mode === "workspace-write") {
       // network_access só se aplica ao sandbox workspace-write

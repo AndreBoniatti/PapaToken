@@ -330,8 +330,16 @@ export default function TaskDetail() {
           <Meta label="Verificação">
             {task.verify_cmd ? <span className="mono">{task.verify_cmd}</span> : "—"}
           </Meta>
-          <Meta label="Entrega">
-            {task.deliver_mode !== "pr" ? (
+          <Meta label={task.kind === "pr_review" ? "PR revisado" : "Entrega"}>
+            {task.kind === "pr_review" ? (
+              task.pr_url ? (
+                <a href={task.pr_url} target="_blank" rel="noreferrer">
+                  Pull Request ↗
+                </a>
+              ) : (
+                "—"
+              )
+            ) : task.deliver_mode !== "pr" ? (
               "só executar"
             ) : task.pr_url ? (
               <a href={task.pr_url} target="_blank" rel="noreferrer">

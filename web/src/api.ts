@@ -54,6 +54,8 @@ export interface Task {
   pr_url?: string | null;
   /** desfecho da última entrega; null = ainda não entregou */
   deliver_status?: "created" | "no_changes" | "failed" | null;
+  /** exec: executa o prompt; pr_review: revisa o PR em pr_url e comenta nele */
+  kind?: "exec" | "pr_review";
   /** comando de verificação (portão de qualidade); null = sem verificação */
   verify_cmd?: string | null;
   /** custo acumulado em valor de API equivalente (só Claude expõe) */

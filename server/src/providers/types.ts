@@ -46,6 +46,8 @@ export interface TaskRow {
   cost_usd: number | null;
   tokens_in: number | null;
   tokens_out: number | null;
+  /** exec: executa o prompt; pr_review: revisa o PR em pr_url e comenta nele */
+  kind: "exec" | "pr_review";
 }
 
 export function parseAttachments(task: Pick<TaskRow, "attachments">): string[] {
