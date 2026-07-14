@@ -10,7 +10,21 @@ import {
   priorityLabel,
   taskAttachments,
   type Task,
+  type TaskRun,
 } from "../api";
+
+const RUN_TYPE_LABEL: Record<TaskRun["run_type"], string> = {
+  exec: "execução",
+  review_attend: "atendimento de review",
+  pr_review: "code review",
+};
+
+const RUN_STATUS_LABEL: Record<TaskRun["status"], string> = {
+  running: "executando",
+  done: "concluída",
+  failed: "falhou",
+  pending: "devolvida à fila",
+};
 
 /** <pre> do markdown com botão de copiar */
 function CodeBlock(props: React.ComponentProps<"pre">) {
@@ -217,6 +231,7 @@ export default function TaskDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [task, setTask] = useState<Task | null>(null);
+  const [runs, setRuns] = useState<TaskRun[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [runProvider, setRunProvider] = useState<string>("");
   const [preview, setPreview] = useState<string | null>(null);
@@ -224,6 +239,7 @@ export default function TaskDetail() {
   const load = useCallback(() => {
     if (!id) return;
     api.task(id).then(setTask).catch((e) => setError(e.message));
+    api.taskRuns(id).then(setRuns).catch(() => setRuns([]));
   }, [id]);
 
   useEffect(() => {
@@ -465,12 +481,52 @@ export default function TaskDetail() {
       </div>
 
       <div className="card mt">
-        <h2>Execução</h2>
-        {task.output_log ? (
-          <LogView log={task.output_log} done={task.status === "done"} />
-        ) : (
-          <p className="muted">Sem log ainda — a tarefa não foi executada.</p>
+        <h2>{runs.length > 1 ? `Execuções (${runs.length})` : "Execução"}</h2>
+        {runs.length === 0 && (
+          <p className="muted">Sem execuções ainda — a tarefa não foi executada.</p>
         )}
+        {runs.map((r, i) => {
+          const num = runs.length - i;
+          const meta = [
+            RUN_TYPE_LABEL[r.run_type],
+            r.provider ?? "?",
+            fmtDate(r.started_at),
+            r.cost_usd ? fmtCost(r.cost_usd) : null,
+          ]
+            .filter(Boolean)
+            .join(" · ");
+          const body = r.output_log ? (
+            <LogView log={r.output_log} done={r.status === "done"} />
+          ) : (
+            <p className="muted">
+              {r.status === "running" ? "Em execução…" : "Sem log registrado."}
+            </p>
+          );
+          // a execução mais recente fica aberta; as anteriores, recolhidas
+          if (i === 0) {
+            return (
+              <div key={r.id}>
+                {runs.length > 1 && (
+                  <p className="muted" style={{ margin: "0 0 8px", fontSize: "0.8rem" }}>
+                    #{num} · {meta} ·{" "}
+                    <span className={`status ${r.status}`}>{RUN_STATUS_LABEL[r.status]}</span>
+                  </p>
+                )}
+                {body}
+              </div>
+            );
+          }
+          return (
+            <details className="form-section" key={r.id}>
+              <summary>
+                <strong>#{num}</strong>
+                <span className="summary-hint">{meta}</span>
+                <span className={`status ${r.status}`}>{RUN_STATUS_LABEL[r.status]}</span>
+              </summary>
+              <div style={{ padding: "0 14px 14px" }}>{body}</div>
+            </details>
+          );
+        })}
       </div>
     </div>
   );

@@ -285,11 +285,7 @@ export async function runTask(taskId: number, forcedProvider?: ProviderId): Prom
 
   const setupIssue = await providerBlocker(providerId, provider);
   if (setupIssue) {
-    db.prepare("UPDATE tasks SET status = 'failed', output_log = ? WHERE id = ?").run(
-      setupIssue,
-      taskId
-    );
-    emit({ type: "task", taskId, status: "failed" });
+    failBeforeStart(task, task.kind === "pr_review" ? "pr_review" : "exec", providerId, setupIssue);
     return;
   }
 
@@ -330,10 +326,12 @@ export async function runTask(taskId: number, forcedProvider?: ProviderId): Prom
         cpSync(anexos, join(worktree.worktreePath, "anexos"), { recursive: true });
       }
     } catch (err) {
-      db.prepare(
-        "UPDATE tasks SET status = 'failed', output_log = ? WHERE id = ?"
-      ).run(`[entrega] preparação da worktree falhou: ${(err as Error).message}`, taskId);
-      emit({ type: "task", taskId, status: "failed" });
+      failBeforeStart(
+        task,
+        "exec",
+        providerId,
+        `[entrega] preparação da worktree falhou: ${(err as Error).message}`
+      );
       return;
     }
   }
@@ -343,10 +341,12 @@ export async function runTask(taskId: number, forcedProvider?: ProviderId): Prom
     try {
       mkdirSync(task.cwd, { recursive: true });
     } catch (err) {
-      db.prepare(
-        "UPDATE tasks SET status = 'failed', output_log = ? WHERE id = ?"
-      ).run(`[executor] diretório de trabalho inválido: ${(err as Error).message}`, taskId);
-      emit({ type: "task", taskId, status: "failed" });
+      failBeforeStart(
+        task,
+        "exec",
+        providerId,
+        `[executor] diretório de trabalho inválido: ${(err as Error).message}`
+      );
       return;
     }
   }
@@ -358,6 +358,7 @@ export async function runTask(taskId: number, forcedProvider?: ProviderId): Prom
     "UPDATE tasks SET status = 'running', started_at = datetime('now'), executed_by = ?, attempts = attempts + 1, deliver_status = NULL WHERE id = ?"
   ).run(providerId, taskId);
   emit({ type: "task", taskId, status: "running" });
+  const runId = startRun(task, "exec", providerId);
 
   const result = await executeWithVerification(
     task,
@@ -368,9 +369,9 @@ export async function runTask(taskId: number, forcedProvider?: ProviderId): Prom
     timeoutMs
   );
 
-  const status = finishTask(task, providerId, result);
+  const status = finishTask(task, providerId, result, runId);
   if (worktree) {
-    await deliver(task, providerId, worktree, status, result.stdout);
+    await deliver(task, providerId, worktree, status, result.stdout, runId);
   }
 }
 
@@ -580,11 +581,12 @@ async function runPrReview(
       taskId: task.id,
     });
   } catch (err) {
-    db.prepare("UPDATE tasks SET status = 'failed', output_log = ? WHERE id = ?").run(
-      `[review-pr] preparação falhou: ${(err as Error).message}`,
-      task.id
+    failBeforeStart(
+      task,
+      "pr_review",
+      providerId,
+      `[review-pr] preparação falhou: ${(err as Error).message}`
     );
-    emit({ type: "task", taskId: task.id, status: "failed" });
     return;
   }
 
@@ -593,6 +595,7 @@ async function runPrReview(
     "UPDATE tasks SET status = 'running', started_at = datetime('now'), executed_by = ?, attempts = attempts + 1 WHERE id = ?"
   ).run(providerId, task.id);
   emit({ type: "task", taskId: task.id, status: "running" });
+  const runId = startRun(task, "pr_review", providerId);
 
   const { cmd, args } = provider.buildCommand(task);
   const result = await executeWithVerification(
@@ -603,7 +606,7 @@ async function runPrReview(
     worktree.worktreePath,
     timeoutMs
   );
-  const status = finishTask(task, providerId, result);
+  const status = finishTask(task, providerId, result, runId);
 
   if (status === "done") {
     const review =
@@ -615,12 +618,14 @@ async function runPrReview(
       const commentUrl = await postPrComment(task.cwd, task.pr_url!, body);
       appendLog(
         task.id,
-        `[review-pr] comentário publicado no PR: ${commentUrl ?? task.pr_url}`
+        `[review-pr] comentário publicado no PR: ${commentUrl ?? task.pr_url}`,
+        runId
       );
     } catch (err) {
       appendLog(
         task.id,
-        `[review-pr] o review foi gerado (acima), mas FALHOU ao comentar no PR: ${(err as Error).message}`
+        `[review-pr] o review foi gerado (acima), mas FALHOU ao comentar no PR: ${(err as Error).message}`,
+        runId
       );
     }
     emit({ type: "task", taskId: task.id, status });
@@ -672,6 +677,7 @@ export async function startReview(taskId: number): Promise<void> {
     "UPDATE tasks SET status = 'running', started_at = datetime('now'), executed_by = ?, attempts = attempts + 1, deliver_status = NULL WHERE id = ?"
   ).run(providerId, taskId);
   emit({ type: "task", taskId, status: "running" });
+  const runId = startRun(task, "review_attend", providerId);
   emit({
     type: "scheduler",
     message: `Tarefa #${task.id}: atendendo ${feedback.comments.length} comentário(s) do review na branch ${feedback.branch}`,
@@ -688,33 +694,43 @@ export async function startReview(taskId: number): Promise<void> {
       worktree.worktreePath,
       timeoutMs
     );
-    const status = finishReview(task, providerId, result);
-    await deliver(task, providerId, worktree, status, result.stdout);
+    const status = finishReview(task, providerId, result, runId);
+    await deliver(task, providerId, worktree, status, result.stdout, runId);
   })().catch((err) => {
     running.delete(providerId);
-    appendLog(taskId, `[review] erro inesperado: ${(err as Error).message}`);
+    appendLog(taskId, `[review] erro inesperado: ${(err as Error).message}`, runId);
     db.prepare("UPDATE tasks SET status = 'failed' WHERE id = ?").run(taskId);
+    db.prepare(
+      "UPDATE task_runs SET status = 'failed', finished_at = datetime('now') WHERE id = ? AND status = 'running'"
+    ).run(runId);
     emit({ type: "task", taskId, status: "failed" });
   });
 }
 
-/** desfecho do atendimento de review — sempre ANEXA ao log (nunca sobrescreve) */
+/** desfecho do atendimento de review — sempre ANEXA ao log da tarefa (nunca sobrescreve) */
 function finishReview(
   task: TaskRow,
   providerId: ProviderId,
-  r: ExecResult
+  r: ExecResult,
+  runId: number
 ): "done" | "failed" {
   running.delete(providerId);
   const status = r.succeeded && !r.timedOut && !r.verifyFailed ? "done" : "failed";
 
-  let section = `\n\n===== atendimento de review =====\n${r.stdout}`;
-  if (r.stderr.trim()) section += `\n[stderr]\n${r.stderr}`;
-  if (r.verifyNotes.length > 0) section += `\n${r.verifyNotes.join("\n")}`;
-  if (r.timedOut) section += "\n[executor] atendimento encerrado por timeout";
+  let log = r.stdout;
+  if (r.stderr.trim()) log += `\n[stderr]\n${r.stderr}`;
+  if (r.verifyNotes.length > 0) log += `\n${r.verifyNotes.join("\n")}`;
+  if (r.timedOut) log += "\n[executor] atendimento encerrado por timeout";
 
   db.prepare(
     "UPDATE tasks SET status = ?, finished_at = datetime('now'), exit_code = ?, output_log = COALESCE(output_log, '') || ? WHERE id = ?"
-  ).run(status, r.exitCode, section.slice(0, MAX_LOG_BYTES), task.id);
+  ).run(
+    status,
+    r.exitCode,
+    `\n\n===== atendimento de review =====\n${log}`.slice(0, MAX_LOG_BYTES),
+    task.id
+  );
+  finishRun(runId, status, r.exitCode, log, r.usage);
   accumulateUsage(task.id, r.usage);
   emit({ type: "task", taskId: task.id, status });
   return status;
@@ -726,12 +742,14 @@ async function deliver(
   providerId: ProviderId,
   worktree: PreparedWorktree,
   status: "done" | "failed" | "pending",
-  stdout: string
+  stdout: string,
+  runId: number
 ) {
   if (status !== "done") {
     appendLog(
       task.id,
-      `[entrega] tarefa não concluída — worktree preservada para inspeção: ${worktree.worktreePath} (branch ${worktree.branch})`
+      `[entrega] tarefa não concluída — worktree preservada para inspeção: ${worktree.worktreePath} (branch ${worktree.branch})`,
+      runId
     );
     emit({ type: "task", taskId: task.id, status });
     return;
@@ -748,23 +766,82 @@ async function deliver(
     title: task.title,
     body: buildPrBody(task, summary),
   });
-  appendLog(task.id, outcome.notes.join("\n"));
+  appendLog(task.id, outcome.notes.join("\n"), runId);
   db.prepare(
     "UPDATE tasks SET deliver_status = ?, pr_url = COALESCE(?, pr_url) WHERE id = ?"
   ).run(outcome.status, outcome.prUrl, task.id);
   emit({ type: "task", taskId: task.id, status });
 }
 
-function appendLog(taskId: number, text: string) {
+function appendLog(taskId: number, text: string, runId?: number) {
   db.prepare(
     "UPDATE tasks SET output_log = COALESCE(output_log, '') || ? WHERE id = ?"
   ).run(`\n${text}`, taskId);
+  if (runId !== undefined) {
+    db.prepare(
+      "UPDATE task_runs SET output_log = COALESCE(output_log, '') || ? WHERE id = ?"
+    ).run(`\n${text}`, runId);
+  }
+}
+
+type RunType = "exec" | "review_attend" | "pr_review";
+
+/** abre um registro no histórico de execuções (status inicial: running) */
+function startRun(task: TaskRow, runType: RunType, providerId: ProviderId): number {
+  const r = db
+    .prepare(
+      "INSERT INTO task_runs (task_id, run_type, provider, model) VALUES (?, ?, ?, ?)"
+    )
+    .run(task.id, runType, providerId, task.model);
+  return Number(r.lastInsertRowid);
+}
+
+/** fecha o registro do run com o desfecho e o log próprio dele */
+function finishRun(
+  runId: number,
+  status: "done" | "failed" | "pending",
+  exitCode: number | null,
+  log: string,
+  usage: RunUsage | null
+) {
+  db.prepare(
+    `UPDATE task_runs SET status = ?, exit_code = ?, output_log = ?,
+            cost_usd = ?, tokens_in = ?, tokens_out = ?, finished_at = datetime('now')
+     WHERE id = ?`
+  ).run(
+    status,
+    exitCode,
+    log.slice(0, MAX_LOG_BYTES),
+    usage?.costUsd ?? null,
+    usage?.tokensIn ?? null,
+    usage?.tokensOut ?? null,
+    runId
+  );
+}
+
+/** falha de preparação (antes da IA rodar): tarefa falha e o run registra o porquê */
+function failBeforeStart(
+  task: TaskRow,
+  runType: RunType,
+  providerId: ProviderId,
+  message: string
+) {
+  db.prepare("UPDATE tasks SET status = 'failed', output_log = ? WHERE id = ?").run(
+    message,
+    task.id
+  );
+  db.prepare(
+    `INSERT INTO task_runs (task_id, run_type, provider, model, status, output_log, finished_at)
+     VALUES (?, ?, ?, ?, 'failed', ?, datetime('now'))`
+  ).run(task.id, runType, providerId, task.model, message);
+  emit({ type: "task", taskId: task.id, status: "failed" });
 }
 
 function finishTask(
   task: TaskRow,
   providerId: ProviderId,
-  r: ExecResult
+  r: ExecResult,
+  runId: number
 ): "done" | "failed" | "pending" {
   running.delete(providerId);
 
@@ -801,6 +878,7 @@ function finishTask(
   db.prepare(
     `UPDATE tasks SET status = ?, finished_at = datetime('now'), exit_code = ?, output_log = ? WHERE id = ?`
   ).run(status, r.exitCode, log.slice(0, MAX_LOG_BYTES), task.id);
+  finishRun(runId, status, r.exitCode, log, r.usage);
   accumulateUsage(task.id, r.usage);
   emit({ type: "task", taskId: task.id, status });
   return status;

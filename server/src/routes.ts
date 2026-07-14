@@ -289,8 +289,17 @@ export async function registerRoutes(app: FastifyInstance) {
     if (existing.status === "running") {
       return reply.code(409).send({ error: "tarefa em execução não pode ser excluída" });
     }
+    db.prepare("DELETE FROM task_runs WHERE task_id = ?").run(id);
     db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
     return { ok: true };
+  });
+
+  app.get("/api/tasks/:id/runs", async (req) => {
+    const { id } = req.params as { id: string };
+    // mais recente primeiro — a UI mostra a última aberta e as demais recolhidas
+    return db
+      .prepare("SELECT * FROM task_runs WHERE task_id = ? ORDER BY id DESC")
+      .all(id);
   });
 
   app.post("/api/tasks/:id/run", async (req, reply) => {

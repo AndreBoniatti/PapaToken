@@ -40,6 +40,11 @@ antes que a janela resete e o saldo se perca.
   "Atender review" (no detalhe da tarefa) lê os comentários novos — posteriores
   ao último push — via `gh`, re-executa a IA na branch do PR em worktree própria
   e o push atualiza o mesmo PR. O portão de qualidade também vale nessa rodada.
+- **Histórico de execuções (1:N)**: cada disparo da IA — tentativa, atendimento
+  de review, code review — vira um registro em `task_runs` com log, desfecho e
+  custo/tokens próprios. O detalhe da tarefa mostra a execução mais recente
+  aberta e as anteriores recolhidas; a tarefa guarda os agregados (status
+  atual, custo somado).
 - **Custo por tarefa**: o envelope JSON do Claude traz custo (valor de API
   equivalente) e tokens de cada execução — o PapaToken acumula por tarefa
   (somando rodadas de correção e de review) e mostra na lista, no detalhe e no

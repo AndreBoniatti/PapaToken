@@ -104,6 +104,22 @@ export function priorityLabel(p: number): string {
   return PRIORITY_OPTIONS.find((o) => o.value === p)?.label ?? String(p);
 }
 
+export interface TaskRun {
+  id: number;
+  task_id: number;
+  run_type: "exec" | "review_attend" | "pr_review";
+  provider: string | null;
+  model: string | null;
+  status: "running" | "done" | "failed" | "pending";
+  exit_code: number | null;
+  output_log: string | null;
+  cost_usd: number | null;
+  tokens_in: number | null;
+  tokens_out: number | null;
+  started_at: string;
+  finished_at: string | null;
+}
+
 export function taskAttachments(task: Pick<Task, "attachments">): string[] {
   try {
     const arr = JSON.parse(task.attachments ?? "[]");
@@ -162,6 +178,7 @@ export const api = {
   refreshUsage: () => request<{ ok: boolean }>("/api/usage/refresh", { method: "POST" }),
   tasks: () => request<Task[]>("/api/tasks"),
   task: (id: number | string) => request<Task>(`/api/tasks/${id}`),
+  taskRuns: (id: number | string) => request<TaskRun[]>(`/api/tasks/${id}/runs`),
   createTask: (t: Partial<Task>) =>
     request<Task>("/api/tasks", { method: "POST", body: JSON.stringify(t) }),
   updateTask: (id: number, t: Partial<Task>) =>

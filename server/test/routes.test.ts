@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.js";
+import { db } from "../src/db.js";
 
 // O banco é :memory: (ver setup.ts) — cada arquivo de teste começa zerado.
 let app: FastifyInstance;
@@ -220,6 +221,41 @@ describe("rotas de tarefas", () => {
     // concluídas/falhas aparecem depois de todas as pendentes
     const statuses = list.map((t) => t.status);
     expect(statuses.lastIndexOf("pending")).toBeLessThan(statuses.indexOf("done"));
+  });
+});
+
+describe("histórico de execuções (task_runs)", () => {
+  it("lista runs da mais recente para a mais antiga e exclui junto com a tarefa", async () => {
+    const t = (
+      await app.inject({
+        method: "POST",
+        url: "/api/tasks",
+        payload: { title: "com histórico", prompt: "p" },
+      })
+    ).json();
+
+    const vazio = await app.inject({ method: "GET", url: `/api/tasks/${t.id}/runs` });
+    expect(vazio.json()).toEqual([]);
+
+    const ins = db.prepare(
+      `INSERT INTO task_runs (task_id, run_type, provider, status, output_log, finished_at)
+       VALUES (?, 'exec', 'claude', ?, ?, datetime('now'))`
+    );
+    ins.run(t.id, "failed", "tentativa 1 quebrou");
+    ins.run(t.id, "done", "tentativa 2 funcionou");
+
+    const runs = (
+      await app.inject({ method: "GET", url: `/api/tasks/${t.id}/runs` })
+    ).json() as { output_log: string; status: string }[];
+    expect(runs).toHaveLength(2);
+    expect(runs[0].output_log).toBe("tentativa 2 funcionou"); // mais recente primeiro
+    expect(runs[1].status).toBe("failed");
+
+    await app.inject({ method: "DELETE", url: `/api/tasks/${t.id}` });
+    const orfaos = db
+      .prepare("SELECT COUNT(*) AS n FROM task_runs WHERE task_id = ?")
+      .get(t.id) as { n: number };
+    expect(orfaos.n).toBe(0);
   });
 });
 

@@ -11,6 +11,12 @@ if (dbPath !== ":memory:") mkdirSync(dirname(dbPath), { recursive: true });
 
 export const db = new DatabaseSync(dbPath);
 
+// antes do CREATE: a tabela de execuções já existia? (decide o backfill único)
+const hadRunsTable =
+  db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'task_runs'")
+    .get() !== undefined;
+
 db.exec(`
   PRAGMA journal_mode = WAL;
 
@@ -66,6 +72,27 @@ db.exec(`
     kind TEXT NOT NULL DEFAULT 'exec' CHECK (kind IN ('exec','pr_review'))
   );
 
+  -- histórico 1:N de execuções de uma tarefa (a tarefa guarda só o agregado)
+  CREATE TABLE IF NOT EXISTS task_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL REFERENCES tasks(id),
+    run_type TEXT NOT NULL DEFAULT 'exec'
+      CHECK (run_type IN ('exec','review_attend','pr_review')),
+    provider TEXT,
+    model TEXT,
+    status TEXT NOT NULL DEFAULT 'running'
+      CHECK (status IN ('running','done','failed','pending')),
+    exit_code INTEGER,
+    output_log TEXT,
+    cost_usd REAL,
+    tokens_in INTEGER,
+    tokens_out INTEGER,
+    started_at TEXT NOT NULL DEFAULT (datetime('now')),
+    finished_at TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_runs_task ON task_runs (task_id, id);
+
   CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -95,6 +122,21 @@ addColumn("cost_usd", "cost_usd REAL");
 addColumn("tokens_in", "tokens_in INTEGER");
 addColumn("tokens_out", "tokens_out INTEGER");
 addColumn("kind", "kind TEXT NOT NULL DEFAULT 'exec' CHECK (kind IN ('exec','pr_review'))");
+
+if (!hadRunsTable) {
+  // backfill único: cada tarefa já executada vira o "run #1" do seu histórico
+  db.exec(`
+    INSERT INTO task_runs (task_id, run_type, provider, model, status, exit_code,
+                           output_log, cost_usd, tokens_in, tokens_out, started_at, finished_at)
+    SELECT id,
+           CASE WHEN kind = 'pr_review' THEN 'pr_review' ELSE 'exec' END,
+           executed_by, model,
+           CASE WHEN status = 'done' THEN 'done' ELSE 'failed' END,
+           exit_code, output_log, cost_usd, tokens_in, tokens_out,
+           COALESCE(started_at, created_at), finished_at
+    FROM tasks WHERE started_at IS NOT NULL
+  `);
+}
 const hadDeliverStatus = taskCols.some((c) => c.name === "deliver_status");
 addColumn(
   "deliver_status",
