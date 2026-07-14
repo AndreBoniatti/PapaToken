@@ -87,8 +87,8 @@ function HarvestStat({ label, agg }: { label: string; agg: StatsAgg }) {
         {fmtCost(agg.cost_usd)}
       </div>
       <span className="muted" style={{ fontSize: "0.8rem" }}>
-        {agg.tasks_done} tarefa(s) concluída(s) · {fmtTokens(agg.tokens_in)} in /{" "}
-        {fmtTokens(agg.tokens_out)} out
+        {agg.tasks_done} tarefa(s) concluída(s) ·{" "}
+        {fmtTokens(agg.tokens_in + agg.tokens_out)} tokens
       </span>
     </div>
   );

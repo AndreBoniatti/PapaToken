@@ -28,6 +28,7 @@ const SETTING_KEYS = new Set([
   "mode",
   "default_workspace_dir",
   "claude_permission_mode",
+  "codex_sandbox_mode",
   "branch_template",
 ]);
 
@@ -510,6 +511,14 @@ export async function registerRoutes(app: FastifyInstance) {
         return reply
           .code(400)
           .send({ error: "claude_permission_mode deve ser acceptEdits | bypassPermissions" });
+      }
+      if (
+        k === "codex_sandbox_mode" &&
+        !["workspace-write", "danger-full-access"].includes(v)
+      ) {
+        return reply
+          .code(400)
+          .send({ error: "codex_sandbox_mode deve ser workspace-write | danger-full-access" });
       }
       setSetting(k, String(v));
     }

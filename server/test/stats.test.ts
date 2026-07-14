@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.js";
 import { db } from "../src/db.js";
 import { extractRunUsage } from "../src/executor.js";
+import { parseCodexTokens } from "../src/providers/codex.js";
 
 const envelope = JSON.stringify({
   type: "result",
@@ -17,9 +18,22 @@ const envelope = JSON.stringify({
   },
 });
 
+describe("parseCodexTokens", () => {
+  it("lê o total do stderr, ignorando separador de milhar (pt-BR e en-US)", () => {
+    expect(parseCodexTokens("...\ntokens used\n55.909\n")).toBe(55909);
+    expect(parseCodexTokens("tokens used: 55,909")).toBe(55909);
+    expect(parseCodexTokens("tokens used 1200")).toBe(1200);
+  });
+
+  it("pega a última ocorrência e retorna null quando não há", () => {
+    expect(parseCodexTokens("tokens used 10\n...\ntokens used\n2.500")).toBe(2500);
+    expect(parseCodexTokens("sem contagem aqui")).toBeNull();
+  });
+});
+
 describe("extractRunUsage", () => {
-  it("extrai custo e soma tokens de entrada (diretos + cache) do envelope", () => {
-    const usage = extractRunUsage("claude", `lixo antes\n${envelope}\n`);
+  it("extrai custo e soma tokens de entrada (diretos + cache) do envelope Claude", () => {
+    const usage = extractRunUsage("claude", { stdout: `lixo antes\n${envelope}\n`, stderr: "" });
     expect(usage).toEqual({
       costUsd: 0.0219705,
       tokensIn: 18 + 7341 + 37645,
@@ -27,9 +41,17 @@ describe("extractRunUsage", () => {
     });
   });
 
-  it("retorna null para codex e para saída sem envelope", () => {
-    expect(extractRunUsage("codex", envelope)).toBeNull();
-    expect(extractRunUsage("claude", "saída qualquer sem json")).toBeNull();
+  it("Codex: total do stderr vai para tokensOut, sem custo", () => {
+    const usage = extractRunUsage("codex", {
+      stdout: "resposta em markdown",
+      stderr: "OpenAI Codex\n...\ntokens used\n55.909",
+    });
+    expect(usage).toEqual({ costUsd: 0, tokensIn: 0, tokensOut: 55909 });
+  });
+
+  it("retorna null sem envelope (Claude) e sem contagem (Codex)", () => {
+    expect(extractRunUsage("claude", { stdout: "sem json", stderr: "" })).toBeNull();
+    expect(extractRunUsage("codex", { stdout: "x", stderr: "sem tokens" })).toBeNull();
   });
 });
 

@@ -30,6 +30,16 @@ const FIELDS: {
     ],
   },
   {
+    key: "codex_sandbox_mode",
+    label: "Autonomia do Codex",
+    hint: "workspace-write: edita arquivos do diretório + acesso à rede. danger-full-access: sem sandbox, roda qualquer comando (equivalente ao bypassPermissions do Claude). ATENÇÃO Windows: o workspace-write do Codex vira somente-leitura (ele não tem sandbox nativo no Windows) — para tarefas do Codex conseguirem escrever arquivos, use danger-full-access.",
+    type: "select",
+    options: [
+      { value: "danger-full-access", label: "danger-full-access — autonomia total (necessário no Windows)" },
+      { value: "workspace-write", label: "workspace-write — edita arquivos + rede (Linux/Mac)" },
+    ],
+  },
+  {
     key: "safety_ceiling_pct",
     label: "Teto de segurança (%)",
     hint: "Nunca despachar quando o uso (5h ou semanal) estiver acima disto — preserva tokens para seu uso manual.",

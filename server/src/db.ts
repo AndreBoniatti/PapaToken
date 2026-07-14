@@ -124,6 +124,12 @@ const defaultSettings: Record<string, string> = {
   // acceptEdits: só edita arquivos; bypassPermissions: usa qualquer ferramenta
   // (web, comandos) sem aprovação — necessário para tarefas autônomas
   claude_permission_mode: "acceptEdits",
+  // sandbox do Codex: workspace-write edita o cwd + rede; danger-full-access
+  // roda qualquer comando sem sandbox (equivalente ao bypassPermissions).
+  // No Windows o workspace-write degrada para read-only (o Codex não tem
+  // sandbox nativo lá) — então o padrão sensato no Windows é danger-full-access,
+  // senão nenhuma tarefa do Codex consegue escrever arquivo.
+  codex_sandbox_mode: process.platform === "win32" ? "danger-full-access" : "workspace-write",
   // nome da branch criada em entregas por PR; variáveis: {id} {slug} {date}
   branch_template: "feat/{slug}",
 };

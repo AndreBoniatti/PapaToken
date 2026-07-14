@@ -135,7 +135,7 @@ function Meta({ label, children }: { label: string; children: React.ReactNode })
   );
 }
 
-function LogView({ log }: { log: string }) {
+function LogView({ log, done }: { log: string; done: boolean }) {
   const parsed = parseLog(log);
 
   return (
@@ -182,7 +182,19 @@ function LogView({ log }: { log: string }) {
         </>
       )}
 
-      {parsed.plain && <div className="log">{parsed.plain}</div>}
+      {/* Saída sem envelope (ex.: Codex). Em tarefas concluídas é markdown —
+          renderiza como o resultado do Claude; em falhas, mantém o texto cru
+          (onde ver o literal do erro é o que importa). */}
+      {parsed.plain &&
+        (done ? (
+          <div className="result-box">
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ pre: CodeBlock }}>
+              {parsed.plain}
+            </ReactMarkdown>
+          </div>
+        ) : (
+          <div className="log">{parsed.plain}</div>
+        ))}
 
       {parsed.stderr && (
         <details className="raw-details">
@@ -304,9 +316,16 @@ export default function TaskDetail() {
           <Meta label="Exit code">{task.exit_code ?? "—"}</Meta>
           <Meta label="Custo (API equiv.)">{fmtCost(task.cost_usd)}</Meta>
           <Meta label="Tokens">
-            {task.tokens_in != null
-              ? `${fmtTokens(task.tokens_in)} in / ${fmtTokens(task.tokens_out ?? 0)} out`
-              : "—"}
+            {(() => {
+              const ti = task.tokens_in ?? 0;
+              const to = task.tokens_out ?? 0;
+              const total = ti + to;
+              if (total === 0) return "—";
+              // Claude separa entrada/saída; Codex dá só o total
+              return ti > 0 && to > 0
+                ? `${fmtTokens(total)} (${fmtTokens(ti)} in / ${fmtTokens(to)} out)`
+                : `${fmtTokens(total)} tokens`;
+            })()}
           </Meta>
           <Meta label="Verificação">
             {task.verify_cmd ? <span className="mono">{task.verify_cmd}</span> : "—"}
@@ -440,7 +459,7 @@ export default function TaskDetail() {
       <div className="card mt">
         <h2>Execução</h2>
         {task.output_log ? (
-          <LogView log={task.output_log} />
+          <LogView log={task.output_log} done={task.status === "done"} />
         ) : (
           <p className="muted">Sem log ainda — a tarefa não foi executada.</p>
         )}

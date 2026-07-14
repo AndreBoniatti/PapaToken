@@ -15,6 +15,7 @@ import {
 } from "./git.js";
 import { run } from "./git.js";
 import type { PreparedWorktree, ReviewComment } from "./git.js";
+import { parseCodexTokens } from "./providers/codex.js";
 import { getProvider } from "./providers/index.js";
 import { parseAttachments } from "./providers/types.js";
 import type { Provider, ProviderId, TaskRow } from "./providers/types.js";
@@ -177,12 +178,20 @@ export interface RunUsage {
 }
 
 /**
- * Custo/tokens de UMA rodada da IA, extraídos do envelope JSON do Claude.
- * O Codex não expõe custo no stdout do exec — retorna null (a UI mostra "—").
+ * Custo/tokens de UMA rodada da IA.
+ * - Claude: do envelope JSON no stdout (custo em US$ + tokens de entrada/saída).
+ * - Codex: do "tokens used" no stderr — só um total, sem split nem custo (a
+ *   assinatura é valor fixo). Guardamos o total em tokensOut.
  */
-export function extractRunUsage(providerId: ProviderId, stdout: string): RunUsage | null {
-  if (providerId !== "claude") return null;
-  const env = parseClaudeEnvelope(stdout);
+export function extractRunUsage(
+  providerId: ProviderId,
+  run: { stdout: string; stderr: string }
+): RunUsage | null {
+  if (providerId === "codex") {
+    const total = parseCodexTokens(run.stderr);
+    return total === null ? null : { costUsd: 0, tokensIn: 0, tokensOut: total };
+  }
+  const env = parseClaudeEnvelope(run.stdout);
   if (!env) return null;
   const u = env.usage ?? {};
   const usage: RunUsage = {
@@ -357,7 +366,7 @@ async function executeWithVerification(
   let exitCode = first.exitCode;
   let timedOut = first.timedOut;
   let succeeded = runSucceeded(providerId, first);
-  let usage = extractRunUsage(providerId, first.stdout);
+  let usage = extractRunUsage(providerId, first);
 
   const verifyNotes: string[] = [];
   let verifyFailed = false;
@@ -388,7 +397,7 @@ async function executeWithVerification(
       exitCode = second.exitCode;
       timedOut = timedOut || second.timedOut;
       succeeded = runSucceeded(providerId, second);
-      usage = sumUsage(usage, extractRunUsage(providerId, second.stdout));
+      usage = sumUsage(usage, extractRunUsage(providerId, second));
 
       if (succeeded) {
         check = await runVerifyCommand(verifyCmd, execCwd, verifyTimeout);
