@@ -78,6 +78,13 @@ const TASK_TIMEOUT: Field = {
   type: "number",
 };
 
+const CODEX_MODELS: Field = {
+  key: "codex_model_suggestions",
+  label: "Modelos sugeridos do Codex",
+  hint: "Sugestões que aparecem ao escolher o modelo numa tarefa do Codex (separadas por vírgula). Use os IDs que o Codex CLI aceita na sua conta (ex.: gpt-5.5, gpt-5.4, gpt-5.4-mini). Cuidado: o app/extensão do ChatGPT mostram modelos (ex.: gpt-5.6-sol) que o CLI recusa. O campo na tarefa é livre — dá para digitar fora da lista, mas aí o risco é falhar ao rodar.",
+  type: "text",
+};
+
 const WORKSPACE_DIR: Field = {
   key: "default_workspace_dir",
   label: "Pasta padrão de tarefas",
@@ -99,7 +106,7 @@ const GROUPS: { title: string; fields: Field[] }[] = [
   },
   {
     title: "Execução — como as IAs rodam",
-    fields: [CLAUDE_PERMISSION, CODEX_SANDBOX, TASK_TIMEOUT],
+    fields: [CLAUDE_PERMISSION, CODEX_SANDBOX, CODEX_MODELS, TASK_TIMEOUT],
   },
   {
     title: "Arquivos e entrega",

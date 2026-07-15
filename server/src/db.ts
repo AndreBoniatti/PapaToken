@@ -176,6 +176,13 @@ const defaultSettings: Record<string, string> = {
   codex_sandbox_mode: process.platform === "win32" ? "danger-full-access" : "workspace-write",
   // nome da branch criada em entregas por PR; variáveis: {id} {slug} {date}
   branch_template: "feat/{slug}",
+  // sugestões de modelo do Codex no formulário (separadas por vírgula). São os
+  // modelos que o Codex CLI aceita numa conta ChatGPT (visibility=list do
+  // ~/.codex/models_cache.json, validados via `codex exec -m`). ATENÇÃO: o app
+  // do ChatGPT / extensão mostram outros (ex.: gpt-5.6-sol) que o CLI recusa
+  // com 400 "not supported when using Codex with a ChatGPT account". O campo é
+  // livre — dá para digitar outro, mas fora desta lista o risco é falhar ao rodar.
+  codex_model_suggestions: "gpt-5.5, gpt-5.4, gpt-5.4-mini, gpt-5.3-codex-spark",
 };
 
 const insertSetting = db.prepare(

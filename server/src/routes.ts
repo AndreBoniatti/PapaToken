@@ -30,6 +30,7 @@ const SETTING_KEYS = new Set([
   "claude_permission_mode",
   "codex_sandbox_mode",
   "branch_template",
+  "codex_model_suggestions",
 ]);
 
 // model/effort entram na linha de comando do CLI (shell) — só caracteres seguros

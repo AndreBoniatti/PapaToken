@@ -37,7 +37,17 @@ const MODEL_OPTIONS: Record<string, { value: string; label: string }[]> = {
   ],
 };
 
-const CODEX_MODEL_SUGGESTIONS = ["gpt-5.5-codex", "gpt-5.5"];
+// fallback quando a config codex_model_suggestions ainda não carregou/está vazia
+const CODEX_MODEL_FALLBACK = ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark"];
+
+/** "gpt-5.5-codex, gpt-5.5" → ["gpt-5.5-codex", "gpt-5.5"] */
+function parseCodexModels(raw: string | undefined): string[] {
+  const list = (raw ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return list.length > 0 ? list : CODEX_MODEL_FALLBACK;
+}
 
 const EFFORT_OPTIONS: Record<string, string[]> = {
   claude: ["low", "medium", "high", "xhigh", "max"],
@@ -143,6 +153,7 @@ export default function Tasks() {
   const [doctor, setDoctor] = useState<GitDoctor | null>(null);
   const [doctorChecking, setDoctorChecking] = useState(false);
   const [verifySuggestions, setVerifySuggestions] = useState<string[]>([]);
+  const [codexModels, setCodexModels] = useState<string[]>(CODEX_MODEL_FALLBACK);
 
   const loadDoctor = useCallback((force?: boolean) => {
     setDoctorChecking(true);
@@ -151,6 +162,14 @@ export default function Tasks() {
       .then(setDoctor)
       .catch(() => setDoctor(null))
       .finally(() => setDoctorChecking(false));
+  }, []);
+
+  // lista de modelos sugeridos do Codex vem das configs (mantida pelo usuário)
+  useEffect(() => {
+    api
+      .settings()
+      .then((s) => setCodexModels(parseCodexModels(s.codex_model_suggestions)))
+      .catch(() => setCodexModels(CODEX_MODEL_FALLBACK));
   }, []);
 
   // diagnóstico do ambiente de PR quando o usuário liga a entrega; e de novo,
@@ -472,7 +491,7 @@ export default function Tasks() {
                     placeholder="vazio = padrão do CLI"
                   />
                   <datalist id="codex-models">
-                    {CODEX_MODEL_SUGGESTIONS.map((m) => (
+                    {codexModels.map((m) => (
                       <option key={m} value={m} />
                     ))}
                   </datalist>

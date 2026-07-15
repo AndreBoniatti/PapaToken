@@ -365,7 +365,21 @@ describe("diagnóstico de entrega", () => {
 describe("rotas de configurações", () => {
   it("entrega os padrões", async () => {
     const res = await app.inject({ method: "GET", url: "/api/settings" });
-    expect(res.json()).toMatchObject({ mode: "window", safety_ceiling_pct: "90" });
+    expect(res.json()).toMatchObject({
+      mode: "window",
+      safety_ceiling_pct: "90",
+      codex_model_suggestions: "gpt-5.5, gpt-5.4, gpt-5.4-mini, gpt-5.3-codex-spark",
+    });
+  });
+
+  it("aceita salvar a lista de modelos sugeridos do Codex", async () => {
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/settings",
+      payload: { codex_model_suggestions: "gpt-5.6-sol, gpt-5.5-codex" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().codex_model_suggestions).toBe("gpt-5.6-sol, gpt-5.5-codex");
   });
 
   it("altera o modo e rejeita valores/chaves inválidos", async () => {
