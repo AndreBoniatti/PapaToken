@@ -208,6 +208,11 @@ export function parsePrUrl(
   return m ? { owner: m[1], repo: m[2], number: Number(m[3]) } : null;
 }
 
+/** rodapé que marca um comentário do PR como uma revisão automática nossa —
+ *  usado na re-revisão para reconhecer os próprios reviews e separar a
+ *  discussão humana que veio depois */
+export const REVIEW_COMMENT_MARKER = "🤖 Review automático — 🟡 PapaToken";
+
 export interface ReviewComment {
   author: string;
   body: string;
@@ -274,6 +279,32 @@ export function extractReviewComments(
   }
   const filtered = sinceIso ? out.filter((c) => c.createdAt > sinceIso) : out;
   return filtered.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+/**
+ * Separa o histórico de review em: a nossa última revisão publicada (achada
+ * pelo marcador no rodapé) e a discussão humana posterior a ela. Alimenta a
+ * re-revisão — o modelo revê o PR atualizado ciente do que já apontou e do
+ * que foi respondido, sem repetir pontos resolvidos.
+ */
+export function splitReviewHistory(
+  pr: PrViewJson,
+  inline: InlineCommentJson[],
+  marker: string
+): { previousReview: string | null; discussion: ReviewComment[] } {
+  const all = extractReviewComments(pr, inline, null); // tudo, ordenado por data asc
+  let previousReview: string | null = null;
+  let boundary: string | null = null;
+  for (const c of all) {
+    if (c.body.includes(marker)) {
+      previousReview = c.body;
+      if (c.createdAt) boundary = c.createdAt;
+    }
+  }
+  const discussion = all.filter(
+    (c) => !c.body.includes(marker) && (boundary === null || c.createdAt > boundary)
+  );
+  return { previousReview, discussion };
 }
 
 export interface ReviewFeedback {
@@ -395,6 +426,44 @@ export async function fetchPrForReview(
     deletions: pr.deletions ?? 0,
     diff: diff.stdout,
   };
+}
+
+export interface ReReviewContext {
+  /** estado ATUAL do PR (diff + metadados) */
+  pr: PrOverview;
+  /** corpo da nossa última revisão publicada, se houver */
+  previousReview: string | null;
+  /** comentários/reviews humanos posteriores à nossa última revisão */
+  discussion: ReviewComment[];
+}
+
+/**
+ * Contexto da re-revisão: o PR atualizado + a nossa revisão anterior + a
+ * discussão desde então. Tudo vai para o prompt do modelo (via stdin) —
+ * assim ele revê o PR ciente do histórico, sem precisar ler nada por fora
+ * (o que o Codex em sandbox read-only não conseguiria fazer).
+ */
+export async function fetchReReviewContext(
+  repoPath: string,
+  prUrl: string
+): Promise<ReReviewContext> {
+  const ref = parsePrUrl(prUrl);
+  if (!ref) throw new Error(`URL de PR não reconhecida: ${prUrl}`);
+
+  // valida que o PR está aberto e traz o diff atualizado
+  const pr = await fetchPrForReview(repoPath, prUrl);
+
+  const view = await runGh(["pr", "view", prUrl, "--json", "comments,reviews"], repoPath);
+  const parsed = view.code === 0 ? (JSON.parse(view.stdout) as PrViewJson) : {};
+  const inlineRes = await runGh(
+    ["api", `repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/comments`],
+    repoPath
+  );
+  const inline =
+    inlineRes.code === 0 ? (JSON.parse(inlineRes.stdout) as InlineCommentJson[]) : [];
+
+  const { previousReview, discussion } = splitReviewHistory(parsed, inline, REVIEW_COMMENT_MARKER);
+  return { pr, previousReview, discussion };
 }
 
 /**

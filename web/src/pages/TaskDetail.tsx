@@ -271,6 +271,15 @@ export default function TaskDetail() {
     }
   };
 
+  const reReview = async () => {
+    try {
+      await api.reReviewTask(task.id);
+      setError(null);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
   const requeue = async () => {
     try {
       await api.updateTask(task.id, { status: "pending" } as Partial<Task>);
@@ -447,6 +456,14 @@ export default function TaskDetail() {
                   title="lê os comentários novos do PR e re-executa a IA na branch dele"
                 >
                   ⟲ Atender review
+                </button>
+              )}
+              {task.kind === "pr_review" && task.pr_url && (
+                <button
+                  onClick={() => void reReview()}
+                  title="revisa o PR atualizado ciente da sua revisão anterior e da discussão desde então"
+                >
+                  ⟲ Revisar de novo
                 </button>
               )}
               {task.status !== "pending" && (

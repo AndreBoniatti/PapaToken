@@ -8,6 +8,7 @@ import {
   deliverPullRequest,
   deliveryBlocker,
   fetchPrForReview,
+  fetchReReviewContext,
   fetchReviewFeedback,
   isValidBranchName,
   postPrComment,
@@ -15,6 +16,7 @@ import {
   prepareWorktree,
   removeWorktree,
   renderBranchTemplate,
+  REVIEW_COMMENT_MARKER,
   run,
 } from "./git.js";
 import type { PreparedWorktree, PrOverview, ReviewComment } from "./git.js";
@@ -127,19 +129,65 @@ export function buildReviewPrompt(
 }
 
 const MAX_DIFF_CHARS = 80_000;
+const MAX_PREV_REVIEW_CHARS = 4_000;
+const MAX_COMMENT_CHARS = 1_500;
 
-/** Prompt da tarefa de code review: diff + contexto do PR + template de saída. */
+/** contexto de uma re-revisão: a revisão anterior + a discussão desde então */
+export interface ReviewHistory {
+  previousReview: string | null;
+  discussion: ReviewComment[];
+}
+
+/**
+ * Prompt da tarefa de code review: diff + contexto do PR + template de saída.
+ * Com `history` (re-revisão), acrescenta a revisão anterior e a discussão
+ * humana para o modelo revisar o PR atualizado sem repetir pontos resolvidos.
+ */
 export function buildPrReviewPrompt(
   task: Pick<TaskRow, "prompt">,
-  pr: PrOverview
+  pr: PrOverview,
+  history?: ReviewHistory
 ): string {
   const diff =
     pr.diff.length > MAX_DIFF_CHARS
       ? `${pr.diff.slice(0, MAX_DIFF_CHARS)}\n\n[... diff truncado em ${MAX_DIFF_CHARS} caracteres — abra os arquivos no diretório para ver o restante]`
       : pr.diff;
   const extras = task.prompt?.trim() || "(nenhuma)";
+
+  const intro = history
+    ? `Você é um revisor de código experiente e já revisou este Pull Request antes. ` +
+      `O autor pode ter feito ajustes desde então — o diff abaixo é o estado ATUAL do PR. ` +
+      `Faça uma revisão completa desse estado atual.\n`
+    : `Você é um revisor de código experiente. Faça o code review do Pull Request abaixo.\n`;
+
+  let historyBlock = "";
+  if (history) {
+    if (history.previousReview) {
+      const prev =
+        history.previousReview.length > MAX_PREV_REVIEW_CHARS
+          ? `${history.previousReview.slice(0, MAX_PREV_REVIEW_CHARS)}\n[...]`
+          : history.previousReview;
+      historyBlock += `[Sua revisão anterior]\n${prev}\n\n`;
+    }
+    if (history.discussion.length > 0) {
+      const list = history.discussion
+        .map((c) => {
+          const loc = c.path ? ` (${c.path}${c.line ? `:${c.line}` : ""})` : "";
+          const body =
+            c.body.length > MAX_COMMENT_CHARS ? `${c.body.slice(0, MAX_COMMENT_CHARS)} […]` : c.body;
+          return `- @${c.author}${loc}: ${body}`;
+        })
+        .join("\n");
+      historyBlock += `[Discussão desde a sua última revisão]\n${list}\n\n`;
+    }
+    historyBlock +=
+      `Confira no diff/arquivos se cada ponto que você levantou antes ainda se aplica: ` +
+      `NÃO repita pontos que já foram resolvidos. Leve em conta a discussão acima e ` +
+      `aponte o que permanece pendente e o que for novo.\n\n`;
+  }
+
   return (
-    `Você é um revisor de código experiente. Faça o code review do Pull Request abaixo.\n` +
+    intro +
     `O código do PR já está checkado neste diretório (branch ${pr.headRefName}) — abra os arquivos ` +
     `que precisar para entender o contexto além do diff. NÃO modifique nenhum arquivo; ` +
     `sua única saída é o texto do review, em Markdown.\n\n` +
@@ -148,6 +196,9 @@ export function buildPrReviewPrompt(
     `Alterações: ${pr.changedFiles} arquivo(s), +${pr.additions}/-${pr.deletions}\n` +
     `Descrição:\n${pr.body.trim() || "(sem descrição)"}\n\n` +
     `[Instruções extras do solicitante]\n${extras}\n\n` +
+    historyBlock +
+    `Revise TODAS as mudanças por completo numa única passada — não pare nos primeiros ` +
+    `achados. Liste de uma vez todos os problemas que encontrar, para evitar rodadas de revisão adicionais.\n\n` +
     `[Diff]\n${diff}\n\n` +
     `[Formato da resposta — siga exatamente]\n` +
     `## Resumo\n(2 a 4 frases: o que o PR faz e sua avaliação geral)\n\n` +
@@ -590,6 +641,24 @@ async function runPrReview(
     return;
   }
 
+  await executePrReview(task, providerId, provider, pr, worktree, undefined, timeoutMs);
+}
+
+/**
+ * Núcleo do code review: marca a tarefa em execução, roda a IA na worktree de
+ * leitura, publica o resultado como comentário no PR e descarta a worktree.
+ * Compartilhado pela primeira revisão (runPrReview) e pela re-revisão
+ * (startPrReReview) — a diferença é só o `history` no prompt.
+ */
+async function executePrReview(
+  task: TaskRow,
+  providerId: ProviderId,
+  provider: Provider,
+  pr: PrOverview,
+  worktree: PreparedWorktree,
+  history: ReviewHistory | undefined,
+  timeoutMs: number
+): Promise<void> {
   running.set(providerId, task.id);
   db.prepare(
     "UPDATE tasks SET status = 'running', started_at = datetime('now'), executed_by = ?, attempts = attempts + 1 WHERE id = ?"
@@ -602,7 +671,7 @@ async function runPrReview(
     task,
     providerId,
     [cmd, ...args].join(" "),
-    buildPrReviewPrompt(task, pr),
+    buildPrReviewPrompt(task, pr, history),
     worktree.worktreePath,
     timeoutMs
   );
@@ -613,7 +682,7 @@ async function runPrReview(
       providerId === "claude"
         ? parseClaudeEnvelope(result.stdout)?.result ?? result.stdout.trim()
         : result.stdout.trim();
-    const body = `${review}\n\n---\n🤖 Review automático — 🟡 PapaToken`;
+    const body = `${review}\n\n---\n${REVIEW_COMMENT_MARKER}`;
     try {
       const commentUrl = await postPrComment(task.cwd, task.pr_url!, body);
       appendLog(
@@ -631,6 +700,68 @@ async function runPrReview(
     emit({ type: "task", taskId: task.id, status });
   }
   await removeWorktree(worktree);
+}
+
+/**
+ * Re-revisão manual de uma tarefa de code review (botão "Revisar de novo"):
+ * revisa o PR atualizado ciente da revisão anterior e da discussão desde
+ * então. Valida e coleta o contexto de forma síncrona (erros viram resposta
+ * da rota); a execução da IA continua em background.
+ */
+export async function startPrReReview(taskId: number): Promise<void> {
+  const task = db
+    .prepare("SELECT * FROM tasks WHERE id = ?")
+    .get(taskId) as unknown as TaskRow | undefined;
+  if (!task) throw new Error(`Tarefa ${taskId} não existe`);
+  if (task.status === "running") throw new Error("tarefa já está em execução");
+  if (task.kind !== "pr_review" || !task.pr_url) {
+    throw new Error("a re-revisão é só para tarefas de review de PR");
+  }
+  if (!task.cwd) throw new Error("review de PR exige o clone local do repositório");
+
+  const providerId: ProviderId = task.provider === "any" ? "claude" : task.provider;
+  const provider = getProvider(providerId);
+  if (!provider) throw new Error(`Provider desconhecido: ${providerId}`);
+  if (running.has(providerId)) {
+    throw new Error(`${providerId} já tem uma tarefa em execução`);
+  }
+
+  const setupIssue = await providerBlocker(providerId, provider);
+  if (setupIssue) throw new Error(setupIssue.replaceAll("[setup] ", ""));
+  const blocker = await deliveryBlocker();
+  if (blocker) throw new Error(blocker);
+
+  const settings = getSettings();
+  const timeoutMs = Number(settings.task_timeout_min ?? "30") * 60_000;
+
+  const { pr, previousReview, discussion } = await fetchReReviewContext(task.cwd, task.pr_url);
+  const worktree = await prepareReviewWorktree({
+    repoPath: task.cwd,
+    branch: pr.headRefName,
+    baseBranch: pr.baseRefName,
+    worktreesDir: join(settings.default_workspace_dir, "worktrees"),
+    taskId: task.id,
+  });
+  emit({
+    type: "scheduler",
+    message: `Tarefa #${task.id}: re-revisando o PR (${discussion.length} comentário(s) novo(s) desde a última revisão)`,
+  });
+
+  // a rota já pode responder — o restante roda em background
+  void executePrReview(
+    task,
+    providerId,
+    provider,
+    pr,
+    worktree,
+    { previousReview, discussion },
+    timeoutMs
+  ).catch((err) => {
+    running.delete(providerId);
+    appendLog(taskId, `[review-pr] erro inesperado: ${(err as Error).message}`);
+    db.prepare("UPDATE tasks SET status = 'failed' WHERE id = ?").run(taskId);
+    emit({ type: "task", taskId, status: "failed" });
+  });
 }
 
 /**

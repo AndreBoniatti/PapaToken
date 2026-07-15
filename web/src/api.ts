@@ -195,6 +195,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({}),
     }),
+  reReviewTask: (id: number) =>
+    request<{ ok: boolean }>(`/api/tasks/${id}/rereview`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
   // multipart: sem Content-Type manual — o browser define o boundary
   uploadAttachments: async (id: number, files: File[]): Promise<Task> => {
     const fd = new FormData();

@@ -12,7 +12,7 @@ import { pipeline } from "node:stream/promises";
 import { homedir } from "node:os";
 import { db, getSettings, setSetting } from "./db.js";
 import { bus } from "./events.js";
-import { blockedInfo, isRunning, runTask, startReview } from "./executor.js";
+import { blockedInfo, isRunning, runTask, startPrReReview, startReview } from "./executor.js";
 import { gitDoctor, isValidBranchName, listRemoteBranches, parsePrUrl } from "./git.js";
 import { suggestVerifyCommands } from "./verify.js";
 import { evaluate, latestUsage, refreshUsage } from "./scheduler.js";
@@ -332,6 +332,18 @@ export async function registerRoutes(app: FastifyInstance) {
       // valida e coleta os comentários de forma síncrona (erros viram resposta
       // clara); a execução da IA continua em background
       await startReview(Number(id));
+      return { ok: true };
+    } catch (err) {
+      return reply.code(409).send({ error: (err as Error).message });
+    }
+  });
+
+  app.post("/api/tasks/:id/rereview", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    try {
+      // re-revisão de tarefa de code review: coleta o PR atualizado + o
+      // histórico de forma síncrona; a IA revisa em background
+      await startPrReReview(Number(id));
       return { ok: true };
     } catch (err) {
       return reply.code(409).send({ error: (err as Error).message });

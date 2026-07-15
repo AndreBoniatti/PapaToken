@@ -118,6 +118,23 @@ describe("rotas de tarefas", () => {
     expect(res.json().error).toContain("não tem PR");
   });
 
+  it("recusa re-revisar tarefa que não é de review de PR", async () => {
+    const created = (
+      await app.inject({
+        method: "POST",
+        url: "/api/tasks",
+        payload: { title: "exec comum", prompt: "p" },
+      })
+    ).json();
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/tasks/${created.id}/rereview`,
+      payload: {},
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toContain("review de PR");
+  });
+
   it("valida tarefas de review de PR (URL válida + clone local; prompt opcional)", async () => {
     const post = (payload: Record<string, unknown>) =>
       app.inject({ method: "POST", url: "/api/tasks", payload });

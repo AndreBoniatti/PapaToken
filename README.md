@@ -35,7 +35,14 @@ antes que a janela resete e o saldo se perca.
   a IA revisa o diff com acesso ao código para contexto e o resultado é
   publicado como **comentário no PR** (resumo, problemas por severidade com
   `arquivo:linha`, sugestões — nunca approve/request-changes: o veredito é
-  humano). Nada é commitado; no Codex roda em sandbox `read-only`.
+  humano). O prompt pede uma varredura completa numa passada só, para achar
+  tudo de uma vez. Nada é commitado; no Codex roda em sandbox `read-only`.
+- **Re-revisão** (botão "Revisar de novo", no detalhe da tarefa de review):
+  depois que o autor mexe no PR, revisa o **estado atual** ciente da **sua
+  revisão anterior** (achada pelo rodapé do comentário) e da **discussão desde
+  então** — tudo vai no prompt via stdin, então o revisor confere o que já foi
+  resolvido, não repete esses pontos e considera as respostas do autor (o Codex
+  em sandbox `read-only` enxerga os comentários sem depender de acesso externo).
 - **Ciclo de review**: quando o PR de uma tarefa recebe comentários, o botão
   "Atender review" (no detalhe da tarefa) lê os comentários novos — posteriores
   ao último push — via `gh`, re-executa a IA na branch do PR em worktree própria
