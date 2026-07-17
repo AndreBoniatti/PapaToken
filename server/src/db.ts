@@ -69,7 +69,9 @@ db.exec(`
     cost_usd REAL,
     tokens_in INTEGER,
     tokens_out INTEGER,
-    kind TEXT NOT NULL DEFAULT 'exec' CHECK (kind IN ('exec','pr_review'))
+    kind TEXT NOT NULL DEFAULT 'exec' CHECK (kind IN ('exec','pr_review')),
+    -- recorrência: minutos entre o fim de um ciclo e a volta à fila; NULL = não repete
+    recur_minutes INTEGER
   );
 
   -- histórico 1:N de execuções de uma tarefa (a tarefa guarda só o agregado)
@@ -122,6 +124,8 @@ addColumn("cost_usd", "cost_usd REAL");
 addColumn("tokens_in", "tokens_in INTEGER");
 addColumn("tokens_out", "tokens_out INTEGER");
 addColumn("kind", "kind TEXT NOT NULL DEFAULT 'exec' CHECK (kind IN ('exec','pr_review'))");
+// recorrência: minutos entre o fim de um ciclo e a volta à fila; NULL = não repete
+addColumn("recur_minutes", "recur_minutes INTEGER");
 
 if (!hadRunsTable) {
   // backfill único: cada tarefa já executada vira o "run #1" do seu histórico

@@ -8,6 +8,8 @@ import {
   fmtTokens,
   onServerEvent,
   priorityLabel,
+  RECUR_OPTIONS,
+  recurLabel,
   taskAttachments,
   type Task,
   type TaskRun,
@@ -332,6 +334,30 @@ export default function TaskDetail() {
           <Meta label="Modelo">{task.model ?? "padrão"}</Meta>
           <Meta label="Effort">{task.effort ?? "padrão"}</Meta>
           <Meta label="Prioridade">{priorityLabel(task.priority)}</Meta>
+          <Meta label="Repetição">
+            <select
+              value={task.recur_minutes ?? 0}
+              disabled={task.status === "running"}
+              onChange={(e) => {
+                const minutes = Number(e.target.value);
+                void api
+                  .updateTask(task.id, { recur_minutes: minutes || null } as Partial<Task>)
+                  .then(() => load())
+                  .catch((err) => setError((err as Error).message));
+              }}
+              title="recorrente: ao concluir (ou falhar), volta à fila depois deste intervalo"
+            >
+              {RECUR_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+              {(task.recur_minutes ?? 0) > 0 &&
+                !RECUR_OPTIONS.some((o) => o.value === task.recur_minutes) && (
+                  <option value={task.recur_minutes!}>{recurLabel(task.recur_minutes)}</option>
+                )}
+            </select>
+          </Meta>
           <Meta label="Tentativas">
             {task.attempts}/{task.max_attempts}
           </Meta>

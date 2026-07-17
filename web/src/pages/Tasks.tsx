@@ -6,6 +6,8 @@ import {
   onServerEvent,
   PRIORITY_OPTIONS,
   priorityLabel,
+  RECUR_OPTIONS,
+  recurLabel,
   type GitDoctor,
   type Task,
 } from "../api";
@@ -19,6 +21,7 @@ const emptyForm = {
   cwd: "",
   pr_url: "",
   priority: 0,
+  recur_minutes: 0,
   model: "",
   effort: "",
   deliver_mode: "none",
@@ -259,6 +262,7 @@ export default function Tasks() {
     form.model || "modelo padrão",
     form.effort ? `effort ${form.effort}` : "effort padrão",
     priorityLabel(form.priority),
+    ...(form.recur_minutes > 0 ? [`🔁 ${recurLabel(form.recur_minutes)}`] : []),
   ].join(" · ");
   const deliverySummary = [
     form.verify_cmd ? `verificação: ${form.verify_cmd}` : "sem verificação",
@@ -470,6 +474,26 @@ export default function Tasks() {
               </select>
             </div>
             <div className="field">
+              <label>Repetir (volta à fila após concluir)</label>
+              <select
+                value={form.recur_minutes}
+                onChange={(e) => setForm({ ...form, recur_minutes: Number(e.target.value) })}
+              >
+                {RECUR_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              {form.recur_minutes > 0 && (
+                <p className="muted" style={{ margin: "4px 0 0", fontSize: "0.78rem" }}>
+                  O intervalo conta a partir do fim de cada execução; o horário exato de rodar
+                  continua sendo decisão do scheduler (sobra de tokens/janela). Falha também
+                  repete no próximo ciclo.
+                </p>
+              )}
+            </div>
+            <div className="field">
               <label>Modelo</label>
               {form.provider === "claude" ? (
                 <select
@@ -647,6 +671,11 @@ export default function Tasks() {
                 <Link to={`/tasks/${t.id}`} style={{ color: "var(--accent)" }}>
                   {t.title}
                 </Link>
+                {(t.recur_minutes ?? 0) > 0 && (
+                  <span title={`recorrente: ${recurLabel(t.recur_minutes)}`} style={{ marginLeft: 6 }}>
+                    🔁
+                  </span>
+                )}
               </td>
               <td>{t.provider}</td>
               <td>{priorityLabel(t.priority)}</td>

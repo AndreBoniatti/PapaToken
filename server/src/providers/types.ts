@@ -48,6 +48,8 @@ export interface TaskRow {
   tokens_out: number | null;
   /** exec: executa o prompt; pr_review: revisa o PR em pr_url e comenta nele */
   kind: "exec" | "pr_review";
+  /** recorrência: minutos entre o fim de um ciclo e a volta à fila; null = não repete */
+  recur_minutes: number | null;
 }
 
 export function parseAttachments(task: Pick<TaskRow, "attachments">): string[] {

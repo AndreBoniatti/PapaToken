@@ -56,9 +56,42 @@ function persistSnapshot(sub: SubscriptionRow, usage: UsageResult) {
   }
 }
 
+/**
+ * Tarefas recorrentes cujo intervalo venceu voltam para a fila. Re-arma a
+ * PRÓPRIA tarefa (done/failed → pending, tentativas zeradas) em vez de clonar:
+ * o histórico de cada ciclo já fica preservado em task_runs. Falha também
+ * re-arma — recorrente significa "tente de novo no próximo ciclo".
+ */
+export function reactivateRecurring(): number {
+  const due = db
+    .prepare(
+      `SELECT id FROM tasks
+       WHERE recur_minutes IS NOT NULL AND recur_minutes > 0
+         AND status IN ('done', 'failed')
+         AND finished_at IS NOT NULL
+         AND datetime(finished_at, '+' || recur_minutes || ' minutes') <= datetime('now')`
+    )
+    .all() as { id: number }[];
+  const rearm = db.prepare("UPDATE tasks SET status = 'pending', attempts = 0 WHERE id = ?");
+  for (const { id } of due) {
+    rearm.run(id);
+    emit({ type: "task", taskId: id, status: "pending" });
+  }
+  return due.length;
+}
+
 async function tick() {
   const settings = getSettings();
   await refreshUsage();
+
+  // mesmo pausado a fila reflete a recorrência — só o despacho fica bloqueado
+  const rearmed = reactivateRecurring();
+  if (rearmed > 0) {
+    emit({
+      type: "scheduler",
+      message: `${rearmed} tarefa(s) recorrente(s) voltaram para a fila`,
+    });
+  }
 
   if (settings.mode === "paused") return;
 

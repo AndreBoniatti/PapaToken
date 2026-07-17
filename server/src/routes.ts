@@ -48,6 +48,16 @@ function invalidModelEffort(model?: unknown, effort?: unknown): string | null {
   return null;
 }
 
+/** vazio/0/null = não repete; senão, minutos inteiros ≥ 60 (evita loop queima-tokens) */
+function invalidRecur(v: unknown): string | null {
+  if (v === undefined || v === null || v === "" || v === 0) return null;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 60) {
+    return "recur_minutes deve ser um inteiro ≥ 60 (minutos) — ou vazio para não repetir";
+  }
+  return null;
+}
+
 function invalidVerifyCmd(v: unknown): string | null {
   if (v === undefined || v === null || v === "") return null;
   const s = String(v);
@@ -176,6 +186,7 @@ export async function registerRoutes(app: FastifyInstance) {
       verify_cmd?: string;
       kind?: string;
       pr_url?: string;
+      recur_minutes?: number | string | null;
     };
     const kind = body.kind === "pr_review" ? "pr_review" : "exec";
     // review de PR: o prompt são instruções extras ao revisor — opcional
@@ -197,7 +208,8 @@ export async function registerRoutes(app: FastifyInstance) {
     const invalid =
       invalidModelEffort(body.model, body.effort) ??
       invalidDelivery(body as Record<string, unknown>) ??
-      invalidVerifyCmd(body.verify_cmd);
+      invalidVerifyCmd(body.verify_cmd) ??
+      invalidRecur(body.recur_minutes);
     if (invalid) return reply.code(400).send({ error: invalid });
     const provider: string = ["claude", "codex", "any"].includes(body.provider ?? "")
       ? (body.provider as string)
@@ -213,8 +225,8 @@ export async function registerRoutes(app: FastifyInstance) {
     const result = db
       .prepare(
         `INSERT INTO tasks (title, prompt, provider, cwd, priority, max_attempts, model, effort,
-                            deliver_mode, base_branch, work_branch, verify_cmd, kind, pr_url)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                            deliver_mode, base_branch, work_branch, verify_cmd, kind, pr_url, recur_minutes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         body.title,
@@ -230,7 +242,8 @@ export async function registerRoutes(app: FastifyInstance) {
         body.work_branch?.trim() || null,
         verifyCmd,
         kind,
-        kind === "pr_review" ? body.pr_url!.trim() : null
+        kind === "pr_review" ? body.pr_url!.trim() : null,
+        body.recur_minutes ? Number(body.recur_minutes) : null
       );
     rememberVerifyCmd(cwd, verifyCmd);
     const id = result.lastInsertRowid as number;
@@ -255,13 +268,15 @@ export async function registerRoutes(app: FastifyInstance) {
     const allowed = [
       "title", "prompt", "provider", "cwd", "priority", "status", "max_attempts",
       "model", "effort", "deliver_mode", "base_branch", "work_branch", "verify_cmd",
+      "recur_minutes",
     ];
     const updates = allowed.filter((k) => body[k] !== undefined);
     if (updates.length === 0) return reply.code(400).send({ error: "nada para atualizar" });
     const invalid =
       invalidModelEffort(body.model, body.effort) ??
       invalidDelivery(body) ??
-      invalidVerifyCmd(body.verify_cmd);
+      invalidVerifyCmd(body.verify_cmd) ??
+      invalidRecur(body.recur_minutes);
     if (invalid) return reply.code(400).send({ error: invalid });
     // "" no form significa "padrão" → null no banco
     if (body.model === "") body.model = null;
@@ -269,6 +284,8 @@ export async function registerRoutes(app: FastifyInstance) {
     if (body.base_branch === "") body.base_branch = null;
     if (body.work_branch === "") body.work_branch = null;
     if (body.verify_cmd === "") body.verify_cmd = null;
+    if (body.recur_minutes === "" || body.recur_minutes === 0) body.recur_minutes = null;
+    else if (body.recur_minutes != null) body.recur_minutes = Number(body.recur_minutes);
     if (body.status !== undefined && !["pending", "blocked", "done", "failed"].includes(String(body.status))) {
       return reply.code(400).send({ error: "status inválido" });
     }

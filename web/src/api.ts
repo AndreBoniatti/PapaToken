@@ -58,6 +58,8 @@ export interface Task {
   kind?: "exec" | "pr_review";
   /** comando de verificação (portão de qualidade); null = sem verificação */
   verify_cmd?: string | null;
+  /** recorrência: minutos entre o fim de um ciclo e a volta à fila; null = não repete */
+  recur_minutes?: number | null;
   /** custo acumulado em valor de API equivalente (só Claude expõe) */
   cost_usd?: number | null;
   tokens_in?: number | null;
@@ -102,6 +104,26 @@ export const PRIORITY_OPTIONS = [
 
 export function priorityLabel(p: number): string {
   return PRIORITY_OPTIONS.find((o) => o.value === p)?.label ?? String(p);
+}
+
+/** Presets de recorrência (minutos entre o fim de um ciclo e a volta à fila).
+ *  O banco guarda o inteiro — valores fora da lista aparecem como "a cada Xh/Xd". */
+export const RECUR_OPTIONS = [
+  { value: 0, label: "Não se repete" },
+  { value: 1440, label: "Diária" },
+  { value: 2880, label: "A cada 2 dias" },
+  { value: 10080, label: "Semanal" },
+  { value: 20160, label: "Quinzenal" },
+  { value: 43200, label: "Mensal (30 dias)" },
+];
+
+export function recurLabel(minutes: number | null | undefined): string {
+  if (!minutes) return "não se repete";
+  const preset = RECUR_OPTIONS.find((o) => o.value === minutes);
+  if (preset) return preset.label.toLowerCase();
+  if (minutes % 1440 === 0) return `a cada ${minutes / 1440} dias`;
+  if (minutes % 60 === 0) return `a cada ${minutes / 60}h`;
+  return `a cada ${minutes} min`;
 }
 
 export interface TaskRun {
