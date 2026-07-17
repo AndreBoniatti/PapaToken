@@ -151,6 +151,19 @@ export interface GitDoctor {
   gh: { installed: boolean; authenticated: boolean; account: string | null };
 }
 
+export interface CodexModelCandidate {
+  slug: string;
+  displayName: string | null;
+  /** false = fora da API, mas roda pela conta ChatGPT */
+  supportedInApi: boolean | null;
+}
+
+export interface CodexModelTest {
+  model: string;
+  ok: boolean;
+  note: string | null;
+}
+
 export interface BrowseResult {
   path: string | null;
   parent: string | null;
@@ -216,6 +229,15 @@ export const api = {
       method: "DELETE",
     }),
   stats: () => request<Stats>("/api/stats"),
+  codexModelCandidates: () =>
+    request<{ ok: boolean; models: CodexModelCandidate[]; error?: string }>(
+      "/api/codex/models/candidates"
+    ),
+  testCodexModel: (model: string) =>
+    request<CodexModelTest>("/api/codex/models/test", {
+      method: "POST",
+      body: JSON.stringify({ model }),
+    }),
   settings: () => request<Settings>("/api/settings"),
   saveSettings: (s: Settings) =>
     request<Settings>("/api/settings", { method: "PATCH", body: JSON.stringify(s) }),

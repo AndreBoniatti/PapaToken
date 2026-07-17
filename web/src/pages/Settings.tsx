@@ -1,6 +1,130 @@
 import { useEffect, useState } from "react";
 import { api, type Settings as SettingsMap } from "../api";
 
+interface ModelRow {
+  slug: string;
+  displayName: string | null;
+  /** cache = veio do ~/.codex/models_cache.json; config = já estava na sua lista */
+  origin: "cache" | "config";
+  state: "testing" | "ok" | "fail";
+  note: string | null;
+}
+
+/**
+ * Campo de modelos do Codex com o botão "Detectar e testar": lê os modelos que
+ * o CLI conhece nesta conta (cache local, instantâneo) + os da sua lista atual,
+ * valida cada um com uma execução mínima real e deixa aplicar só os válidos.
+ * Nunca sobrescreve o campo sozinho — aplicar é decisão do usuário.
+ */
+function CodexModelsField({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const [rows, setRows] = useState<ModelRow[]>([]);
+  const [phase, setPhase] = useState<"idle" | "running" | "done" | "error">("idle");
+  const [error, setError] = useState<string | null>(null);
+  const [applied, setApplied] = useState(false);
+
+  const detect = async () => {
+    setPhase("running");
+    setError(null);
+    setApplied(false);
+    setRows([]);
+    try {
+      const res = await api.codexModelCandidates();
+      if (!res.ok) throw new Error(res.error ?? "falha ao detectar modelos");
+      const list: ModelRow[] = res.models.map((m) => ({
+        slug: m.slug,
+        displayName: m.displayName,
+        origin: "cache",
+        state: "testing",
+        note: null,
+      }));
+      // entradas manuais da lista atual também são testadas — se alguma estiver
+      // quebrada (ex.: modelo que a conta não aceita), aparece como ✗
+      for (const c of value.split(",").map((s) => s.trim()).filter(Boolean)) {
+        if (!list.some((r) => r.slug === c)) {
+          list.push({ slug: c, displayName: null, origin: "config", state: "testing", note: null });
+        }
+      }
+      setRows(list);
+      await Promise.all(
+        list.map(async (r) => {
+          const done = (state: "ok" | "fail", note: string | null) =>
+            setRows((prev) => prev.map((x) => (x.slug === r.slug ? { ...x, state, note } : x)));
+          try {
+            const t = await api.testCodexModel(r.slug);
+            done(t.ok ? "ok" : "fail", t.note);
+          } catch (e) {
+            done("fail", (e as Error).message);
+          }
+        })
+      );
+      setPhase("done");
+    } catch (e) {
+      setError((e as Error).message);
+      setPhase("error");
+    }
+  };
+
+  const valid = rows.filter((r) => r.state === "ok").map((r) => r.slug);
+
+  return (
+    <>
+      <input type="text" value={value} onChange={(e) => onChange(e.target.value)} />
+      <div style={{ marginTop: 6 }}>
+        <button
+          onClick={() => void detect()}
+          disabled={phase === "running"}
+          title="Lê os modelos que o Codex CLI conhece nesta conta e testa cada um com uma execução mínima"
+          style={{ fontSize: "0.8rem", padding: "4px 10px" }}
+        >
+          {phase === "running" ? "Testando…" : "🔄 Detectar e testar"}
+        </button>
+      </div>
+      {error && (
+        <p className="error-box" style={{ margin: "6px 0 0" }}>
+          {error}
+        </p>
+      )}
+      {rows.length > 0 && (
+        <div style={{ margin: "8px 0 0", display: "grid", gap: 4 }}>
+          {rows.map((r) => (
+            <div key={r.slug} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+              <span className={`badge ${r.state === "ok" ? "ok" : r.state === "fail" ? "bad" : "info"}`}>
+                {r.state === "ok" ? "✓ ok" : r.state === "fail" ? "✗ falhou" : "testando…"}
+              </span>
+              <code>{r.slug}</code>
+              {r.origin === "config" && <span className="muted" style={{ fontSize: "0.75rem" }}>(da sua lista)</span>}
+              {r.note && <span className="muted" style={{ fontSize: "0.75rem" }}>{r.note}</span>}
+            </div>
+          ))}
+          {phase === "done" && (
+            <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <button
+                onClick={() => {
+                  onChange(valid.join(", "));
+                  setApplied(true);
+                }}
+                disabled={valid.length === 0}
+              >
+                Aplicar os válidos ao campo
+              </button>
+              {applied && <span className="badge ok">aplicado — clique em Salvar</span>}
+              <span className="muted" style={{ fontSize: "0.75rem" }}>
+                Fonte: cache local do Codex CLI; cada ✓ é uma execução real (poucos tokens).
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
 interface Field {
   key: string;
   label: string;
@@ -149,6 +273,11 @@ export default function Settings() {
             </option>
           ))}
         </select>
+      ) : f.key === CODEX_MODELS.key ? (
+        <CodexModelsField
+          value={values[f.key] ?? ""}
+          onChange={(v) => setValues({ ...values, [f.key]: v })}
+        />
       ) : (
         <input
           type={f.type}

@@ -12,7 +12,8 @@ import { pipeline } from "node:stream/promises";
 import { homedir } from "node:os";
 import { db, getSettings, setSetting } from "./db.js";
 import { bus } from "./events.js";
-import { blockedInfo, isRunning, runTask, startPrReReview, startReview } from "./executor.js";
+import { listCodexModelCandidates, testCodexModel } from "./codex-models.js";
+import { blockedInfo, cliOnPath, isRunning, runTask, startPrReReview, startReview } from "./executor.js";
 import { gitDoctor, isValidBranchName, listRemoteBranches, parsePrUrl } from "./git.js";
 import { suggestVerifyCommands } from "./verify.js";
 import { evaluate, latestUsage, refreshUsage } from "./scheduler.js";
@@ -532,6 +533,25 @@ export async function registerRoutes(app: FastifyInstance) {
     } catch {
       return reply.code(400).send({ error: `Não foi possível ler ${path}` });
     }
+  });
+
+  // ---- modelos do Codex (detecção via cache local + smoke test) ----
+  app.get("/api/codex/models/candidates", async () => listCodexModelCandidates());
+
+  app.post("/api/codex/models/test", async (req, reply) => {
+    const { model } = (req.body ?? {}) as { model?: string };
+    // o slug entra na linha de comando (shell) — mesma validação das tarefas
+    if (!model || !MODEL_RE.test(model)) {
+      return reply
+        .code(400)
+        .send({ error: "model inválido — use apenas letras, números, ponto, hífen e underline" });
+    }
+    if (!(await cliOnPath("codex"))) {
+      return reply
+        .code(409)
+        .send({ error: "Codex CLI não está instalado ou não está no PATH deste servidor." });
+    }
+    return testCodexModel(model);
   });
 
   // ---- settings ----

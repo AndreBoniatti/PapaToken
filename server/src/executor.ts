@@ -526,14 +526,14 @@ function accumulateUsage(taskId: number, usage: RunUsage | null) {
   ).run(usage.costUsd, usage.tokensIn, usage.tokensOut, taskId);
 }
 
-interface RunOutcome {
+export interface RunOutcome {
   exitCode: number | null;
   stdout: string;
   stderr: string;
   timedOut: boolean;
 }
 
-function spawnProvider(
+export function spawnProvider(
   commandLine: string,
   promptText: string,
   cwd: string,
