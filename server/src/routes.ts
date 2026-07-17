@@ -1,10 +1,12 @@
 import type { FastifyInstance } from "fastify";
+import { spawn } from "node:child_process";
 import {
   createReadStream,
   createWriteStream,
   existsSync,
   mkdirSync,
   readdirSync,
+  statSync,
   unlinkSync,
 } from "node:fs";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
@@ -91,6 +93,37 @@ function invalidDelivery(body: Record<string, unknown>): string | null {
     }
   }
   return null;
+}
+
+/**
+ * Abre a pasta no gerenciador de arquivos do SO (app local, single-user — o
+ * servidor roda na mesma máquina do usuário). spawn SEM shell: o caminho vai
+ * como argumento, sem risco de injeção. Resolve no 'spawn' (não espera sair:
+ * o explorer.exe do Windows retorna exit 1 mesmo quando abre com sucesso).
+ */
+function openInFileManager(dir: string): Promise<void> {
+  const cmd =
+    process.platform === "win32"
+      ? "explorer.exe"
+      : process.platform === "darwin"
+        ? "open"
+        : "xdg-open";
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(cmd, [dir], { detached: true, stdio: "ignore" });
+    child.on("spawn", () => {
+      child.unref();
+      resolvePromise();
+    });
+    child.on("error", (err) => {
+      reject(
+        new Error(
+          cmd === "xdg-open"
+            ? "xdg-open não encontrado — sem ambiente gráfico (ou xdg-utils) não há explorador para abrir"
+            : `falha ao abrir o explorador: ${err.message}`
+        )
+      );
+    });
+  });
 }
 
 function listDrives(): string[] {
@@ -526,6 +559,29 @@ export async function registerRoutes(app: FastifyInstance) {
       .filter((d) => existsSync(d))
       .slice(0, 8);
     return { dirs };
+  });
+
+  app.post("/api/fs/open", async (req, reply) => {
+    const q = (((req.body ?? {}) as { path?: string }).path ?? "").trim();
+    if (!q) return reply.code(400).send({ error: "path é obrigatório" });
+    const path = resolve(q);
+    let isDir = false;
+    try {
+      isDir = statSync(path).isDirectory();
+    } catch {
+      // não existe — cai no 404 abaixo
+    }
+    if (!isDir) {
+      return reply
+        .code(404)
+        .send({ error: `A pasta não existe mais neste caminho: ${path}` });
+    }
+    try {
+      await openInFileManager(path);
+      return { ok: true };
+    } catch (err) {
+      return reply.code(500).send({ error: (err as Error).message });
+    }
   });
 
   app.get("/api/fs/browse", async (req, reply) => {

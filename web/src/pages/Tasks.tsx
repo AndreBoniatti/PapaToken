@@ -420,7 +420,7 @@ export default function Tasks() {
                       <button
                         type="button"
                         className="attachment-name"
-                        title={f.type.startsWith("image/") ? "visualizar" : f.name}
+                        title={`${f.name}${f.type.startsWith("image/") ? " — visualizar" : ""}`}
                         onClick={() => openFilePreview(f)}
                       >
                         📎 {f.name}

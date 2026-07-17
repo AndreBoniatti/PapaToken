@@ -217,21 +217,62 @@ textarea { min-height: 90px; resize: vertical; }
 .mono { font-family: Consolas, monospace; font-size: 0.82rem; }
 
 /* --- detalhe de tarefa --- */
-.task-detail { max-width: 860px; }
+/* esta página usa duas colunas (conteúdo + lateral de metadados) — merece mais largura */
+.content:has(.task-detail) { max-width: 1360px; }
 
 .detail-header {
   display: flex;
   align-items: center;
   gap: 14px;
-  margin-bottom: 18px;
+  margin-bottom: 14px;
 }
 .detail-header h1 { margin: 0; }
 
-.meta-grid {
+/* conteúdo de leitura à esquerda; metadados agrupados na lateral direita */
+.detail-layout {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 14px 18px;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 16px;
+  align-items: start;
 }
+@media (max-width: 1080px) {
+  .detail-layout { grid-template-columns: 1fr; }
+}
+
+/* diretório de trabalho — barra destacada acima do prompt (é entrada da tarefa) */
+.detail-cwd {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.detail-cwd-path { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--text); }
+.detail-cwd button {
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-size: 0.75rem;
+  padding: 3px 10px;
+}
+
+/* anexos como rodapé do card de Prompt (entrada, junto do prompt) */
+.prompt-attachments {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.aside-group + .aside-group {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.aside-group .settings-group-title { margin-bottom: 10px; }
+.aside-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
+
 .meta-item { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .meta-wide { grid-column: 1 / -1; }
 .meta-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
@@ -328,7 +369,17 @@ textarea { min-height: 90px; resize: vertical; }
   padding: 3px 10px;
   font-size: 0.8rem;
   margin: 0 6px 6px 0;
+  max-width: 100%;
 }
+/* nome longo trunca com … (nome completo fica no title/hover); o ✕ nunca some */
+.attachment-chip .attachment-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.attachment-chip button[title="remover"],
+.attachment-chip button[title="remover anexo"] { flex-shrink: 0; }
 .attachment-chip button {
   background: none;
   border: none;
@@ -417,10 +468,6 @@ textarea { min-height: 90px; resize: vertical; }
 }
 .raw-details summary:hover { color: var(--text); }
 .raw-details .log { margin-top: 8px; }
-
-@media (max-width: 900px) {
-  .meta-grid { grid-template-columns: repeat(2, 1fr); }
-}
 
 /* --- seletor de pasta --- */
 .input-with-button { display: flex; gap: 8px; }

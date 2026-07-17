@@ -142,11 +142,29 @@ function fmtDuration(ms?: number): string | null {
   return `${Math.floor(sec / 60)}min ${Math.round(sec % 60)}s`;
 }
 
-function Meta({ label, children }: { label: string; children: React.ReactNode }) {
+function Meta({
+  label,
+  children,
+  wide,
+}: {
+  label: string;
+  children: React.ReactNode;
+  wide?: boolean;
+}) {
   return (
-    <div className="meta-item">
+    <div className={`meta-item${wide ? " meta-wide" : ""}`}>
       <span className="meta-label">{label}</span>
       <span className="meta-value">{children}</span>
+    </div>
+  );
+}
+
+/** grupo temático de metadados na lateral (título no estilo das Configurações) */
+function MetaGroup({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="aside-group">
+      <h3 className="settings-group-title">{title}</h3>
+      <div className="aside-grid">{children}</div>
     </div>
   );
 }
@@ -327,184 +345,48 @@ export default function TaskDetail() {
         <span className={`status ${task.status}`}>{task.status}</span>
       </div>
 
-      <div className="card">
-        <div className="meta-grid">
-          <Meta label="IA designada">{providerName[task.provider] ?? task.provider}</Meta>
-          <Meta label="Executada por">{task.executed_by ?? "—"}</Meta>
-          <Meta label="Modelo">{task.model ?? "padrão"}</Meta>
-          <Meta label="Effort">{task.effort ?? "padrão"}</Meta>
-          <Meta label="Prioridade">{priorityLabel(task.priority)}</Meta>
-          <Meta label="Repetição">
-            <select
-              value={task.recur_minutes ?? 0}
-              disabled={task.status === "running"}
-              onChange={(e) => {
-                const minutes = Number(e.target.value);
-                void api
-                  .updateTask(task.id, { recur_minutes: minutes || null } as Partial<Task>)
-                  .then(() => load())
-                  .catch((err) => setError((err as Error).message));
-              }}
-              title="recorrente: ao concluir (ou falhar), volta à fila depois deste intervalo"
-            >
-              {RECUR_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-              {(task.recur_minutes ?? 0) > 0 &&
-                !RECUR_OPTIONS.some((o) => o.value === task.recur_minutes) && (
-                  <option value={task.recur_minutes!}>{recurLabel(task.recur_minutes)}</option>
-                )}
+      <div className="toolbar" style={{ marginBottom: 14 }}>
+        {task.status !== "running" ? (
+          <>
+            <select value={runProvider} onChange={(e) => setRunProvider(e.target.value)}>
+              <option value="">IA da tarefa</option>
+              <option value="claude">Forçar Claude</option>
+              <option value="codex">Forçar Codex</option>
             </select>
-          </Meta>
-          <Meta label="Tentativas">
-            {task.attempts}/{task.max_attempts}
-          </Meta>
-          <Meta label="Criada">{fmtDate(task.created_at)}</Meta>
-          <Meta label="Iniciada">{fmtDate(task.started_at)}</Meta>
-          <Meta label="Finalizada">{fmtDate(task.finished_at)}</Meta>
-          <Meta label="Exit code">{task.exit_code ?? "—"}</Meta>
-          <Meta label="Custo (API equiv.)">{fmtCost(task.cost_usd)}</Meta>
-          <Meta label="Tokens">
-            {(() => {
-              const ti = task.tokens_in ?? 0;
-              const to = task.tokens_out ?? 0;
-              const total = ti + to;
-              if (total === 0) return "—";
-              // Claude separa entrada/saída; Codex dá só o total
-              return ti > 0 && to > 0
-                ? `${fmtTokens(total)} (${fmtTokens(ti)} in / ${fmtTokens(to)} out)`
-                : `${fmtTokens(total)} tokens`;
-            })()}
-          </Meta>
-          <Meta label="Verificação">
-            {task.verify_cmd ? <span className="mono">{task.verify_cmd}</span> : "—"}
-          </Meta>
-          <Meta label={task.kind === "pr_review" ? "PR revisado" : "Entrega"}>
-            {task.kind === "pr_review" ? (
-              task.pr_url ? (
-                <a href={task.pr_url} target="_blank" rel="noreferrer">
-                  Pull Request ↗
-                </a>
-              ) : (
-                "—"
-              )
-            ) : task.deliver_mode !== "pr" ? (
-              "só executar"
-            ) : task.pr_url ? (
-              <a href={task.pr_url} target="_blank" rel="noreferrer">
-                Pull Request ↗
-              </a>
-            ) : task.deliver_status === "no_changes" ? (
-              "sem alterações — PR não criado"
-            ) : task.deliver_status === "failed" ? (
-              "entrega falhou — veja o log da execução"
-            ) : (
-              `PR pendente${task.base_branch ? ` (base: ${task.base_branch})` : ""}`
+            <button className="primary" onClick={() => void run()}>
+              ▶ Executar agora
+            </button>
+            {task.deliver_mode === "pr" && task.pr_url && (
+              <button
+                onClick={() => void review()}
+                title="lê os comentários novos do PR e re-executa a IA na branch dele"
+              >
+                ⟲ Atender review
+              </button>
             )}
-          </Meta>
-          <div className="meta-item meta-wide">
-            <span className="meta-label">Diretório de trabalho</span>
-            <span className="meta-value mono">{task.cwd}</span>
-          </div>
-          <div className="meta-item meta-wide">
-            <span className="meta-label">Anexos</span>
-            <span className="meta-value">
-              {taskAttachments(task).length === 0 && <span className="muted">nenhum</span>}
-              {taskAttachments(task).map((name) => (
-                <span key={name} className="attachment-chip">
-                  <button
-                    type="button"
-                    className="attachment-name"
-                    title={isImage(name) ? "visualizar" : "abrir"}
-                    onClick={() =>
-                      isImage(name)
-                        ? setPreview(name)
-                        : window.open(attachmentUrl(name), "_blank")
-                    }
-                  >
-                    📎 {name}
-                  </button>
-                  {task.status !== "running" && (
-                    <button
-                      type="button"
-                      title="remover anexo"
-                      onClick={() => {
-                        void api
-                          .deleteAttachment(task.id, name)
-                          .then(() => load())
-                          .catch((e) => setError((e as Error).message));
-                      }}
-                    >
-                      ✕
-                    </button>
-                  )}
-                </span>
-              ))}
-              {task.status !== "running" && (
-                <label className="attachment-add">
-                  + anexar
-                  <input
-                    type="file"
-                    multiple
-                    style={{ display: "none" }}
-                    onChange={(e) => {
-                      const picked = Array.from(e.target.files ?? []);
-                      e.target.value = "";
-                      if (picked.length === 0) return;
-                      void api
-                        .uploadAttachments(task.id, picked)
-                        .then(() => load())
-                        .catch((err) => setError((err as Error).message));
-                    }}
-                  />
-                </label>
-              )}
-            </span>
-          </div>
-        </div>
-
-        <div className="toolbar mt">
-          {task.status !== "running" ? (
-            <>
-              <select value={runProvider} onChange={(e) => setRunProvider(e.target.value)}>
-                <option value="">IA da tarefa</option>
-                <option value="claude">Forçar Claude</option>
-                <option value="codex">Forçar Codex</option>
-              </select>
-              <button className="primary" onClick={() => void run()}>
-                ▶ Executar agora
+            {task.kind === "pr_review" && task.pr_url && (
+              <button
+                onClick={() => void reReview()}
+                title="revisa o PR atualizado ciente da sua revisão anterior e da discussão desde então"
+              >
+                ⟲ Revisar de novo
               </button>
-              {task.deliver_mode === "pr" && task.pr_url && (
-                <button
-                  onClick={() => void review()}
-                  title="lê os comentários novos do PR e re-executa a IA na branch dele"
-                >
-                  ⟲ Atender review
-                </button>
-              )}
-              {task.kind === "pr_review" && task.pr_url && (
-                <button
-                  onClick={() => void reReview()}
-                  title="revisa o PR atualizado ciente da sua revisão anterior e da discussão desde então"
-                >
-                  ⟲ Revisar de novo
-                </button>
-              )}
-              {task.status !== "pending" && (
-                <button onClick={() => void requeue()}>↩ Devolver à fila</button>
-              )}
-              <button className="danger" onClick={() => void remove()}>
-                Excluir
-              </button>
-            </>
-          ) : (
-            <span className="badge info">executando…</span>
-          )}
-        </div>
-        {error && <p className="error-box mt">{error}</p>}
+            )}
+            {task.status !== "pending" && (
+              <button onClick={() => void requeue()}>↩ Devolver à fila</button>
+            )}
+            <button className="danger" onClick={() => void remove()}>
+              Excluir
+            </button>
+          </>
+        ) : (
+          <span className="badge info">executando…</span>
+        )}
       </div>
+      {error && <p className="error-box" style={{ margin: "0 0 14px" }}>{error}</p>}
+
+      <div className="detail-layout">
+        <div>
 
       {preview && (
         <div className="modal-overlay" onClick={() => setPreview(null)}>
@@ -518,10 +400,78 @@ export default function TaskDetail() {
         </div>
       )}
 
-      <div className="card mt">
-        <h2>Prompt</h2>
-        <div className="prompt-box">{task.prompt}</div>
-      </div>
+          <div className="detail-cwd" title="Diretório de trabalho da tarefa">
+            <span aria-hidden="true">📁</span>
+            <span className="mono detail-cwd-path">{task.cwd}</span>
+            <button
+              type="button"
+              title="Abrir esta pasta no explorador de arquivos"
+              onClick={() =>
+                void api.openDir(task.cwd).catch((e) => setError((e as Error).message))
+              }
+            >
+              abrir ↗
+            </button>
+          </div>
+          <div className="card">
+            <h2>Prompt</h2>
+            <div className="prompt-box">{task.prompt}</div>
+            <div className="prompt-attachments">
+              <span className="meta-label">Anexos</span>
+              <div style={{ marginTop: 6 }}>
+                {taskAttachments(task).length === 0 && <span className="muted">nenhum</span>}
+                {taskAttachments(task).map((name) => (
+                  <span key={name} className="attachment-chip">
+                    <button
+                      type="button"
+                      className="attachment-name"
+                      title={`${name} — ${isImage(name) ? "visualizar" : "abrir"}`}
+                      onClick={() =>
+                        isImage(name)
+                          ? setPreview(name)
+                          : window.open(attachmentUrl(name), "_blank")
+                      }
+                    >
+                      📎 {name}
+                    </button>
+                    {task.status !== "running" && (
+                      <button
+                        type="button"
+                        title="remover anexo"
+                        onClick={() => {
+                          void api
+                            .deleteAttachment(task.id, name)
+                            .then(() => load())
+                            .catch((e) => setError((e as Error).message));
+                        }}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </span>
+                ))}
+                {task.status !== "running" && (
+                  <label className="attachment-add">
+                    + anexar
+                    <input
+                      type="file"
+                      multiple
+                      style={{ display: "none" }}
+                      onChange={(e) => {
+                        const picked = Array.from(e.target.files ?? []);
+                        e.target.value = "";
+                        if (picked.length === 0) return;
+                        void api
+                          .uploadAttachments(task.id, picked)
+                          .then(() => load())
+                          .catch((err) => setError((err as Error).message));
+                      }}
+                    />
+                  </label>
+                )}
+              </div>
+            </div>
+          </div>
 
       <div className="card mt">
         <h2>{runs.length > 1 ? `Execuções (${runs.length})` : "Execução"}</h2>
@@ -570,6 +520,109 @@ export default function TaskDetail() {
             </details>
           );
         })}
+      </div>
+        </div>
+
+        <aside>
+          <div className="card">
+            <MetaGroup title="Execução">
+              <Meta label="IA designada">{providerName[task.provider] ?? task.provider}</Meta>
+              <Meta label="Executada por">{task.executed_by ?? "—"}</Meta>
+              <Meta label="Modelo">{task.model ?? "padrão"}</Meta>
+              <Meta label="Effort">{task.effort ?? "padrão"}</Meta>
+              <Meta label="Prioridade">{priorityLabel(task.priority)}</Meta>
+              <Meta label="Tentativas">
+                {task.attempts}/{task.max_attempts}
+              </Meta>
+              <Meta label="Repetição" wide>
+                <select
+                  value={task.recur_minutes ?? 0}
+                  disabled={task.status === "running"}
+                  onChange={(e) => {
+                    const minutes = Number(e.target.value);
+                    void api
+                      .updateTask(task.id, { recur_minutes: minutes || null } as Partial<Task>)
+                      .then(() => load())
+                      .catch((err) => setError((err as Error).message));
+                  }}
+                  title="recorrente: ao concluir (ou falhar), volta à fila depois deste intervalo"
+                >
+                  {RECUR_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                  {(task.recur_minutes ?? 0) > 0 &&
+                    !RECUR_OPTIONS.some((o) => o.value === task.recur_minutes) && (
+                      <option value={task.recur_minutes!}>{recurLabel(task.recur_minutes)}</option>
+                    )}
+                </select>
+              </Meta>
+            </MetaGroup>
+
+            <MetaGroup title="Linha do tempo">
+              <Meta label="Criada">{fmtDate(task.created_at)}</Meta>
+              <Meta label="Iniciada">{fmtDate(task.started_at)}</Meta>
+              <Meta label="Finalizada">{fmtDate(task.finished_at)}</Meta>
+              <Meta label="Duração">
+                {(() => {
+                  if (!task.started_at || !task.finished_at) return "—";
+                  const ms =
+                    new Date(task.finished_at + "Z").getTime() -
+                    new Date(task.started_at + "Z").getTime();
+                  return ms > 0 ? fmtDuration(ms) : "—";
+                })()}
+              </Meta>
+            </MetaGroup>
+
+            <MetaGroup title="Consumo">
+              <Meta label="Custo (API equiv.)">{fmtCost(task.cost_usd)}</Meta>
+              <Meta label="Exit code">{task.exit_code ?? "—"}</Meta>
+              <Meta label="Tokens" wide>
+                {(() => {
+                  const ti = task.tokens_in ?? 0;
+                  const to = task.tokens_out ?? 0;
+                  const total = ti + to;
+                  if (total === 0) return "—";
+                  // Claude separa entrada/saída; Codex dá só o total
+                  return ti > 0 && to > 0
+                    ? `${fmtTokens(total)} (${fmtTokens(ti)} in / ${fmtTokens(to)} out)`
+                    : `${fmtTokens(total)} tokens`;
+                })()}
+              </Meta>
+            </MetaGroup>
+
+            <MetaGroup title="Qualidade e entrega">
+              <Meta label="Verificação" wide>
+                {task.verify_cmd ? <span className="mono">{task.verify_cmd}</span> : "—"}
+              </Meta>
+              <Meta label={task.kind === "pr_review" ? "PR revisado" : "Entrega"} wide>
+                {task.kind === "pr_review" ? (
+                  task.pr_url ? (
+                    <a href={task.pr_url} target="_blank" rel="noreferrer">
+                      Pull Request ↗
+                    </a>
+                  ) : (
+                    "—"
+                  )
+                ) : task.deliver_mode !== "pr" ? (
+                  "só executar"
+                ) : task.pr_url ? (
+                  <a href={task.pr_url} target="_blank" rel="noreferrer">
+                    Pull Request ↗
+                  </a>
+                ) : task.deliver_status === "no_changes" ? (
+                  "sem alterações — PR não criado"
+                ) : task.deliver_status === "failed" ? (
+                  "entrega falhou — veja o log da execução"
+                ) : (
+                  `PR pendente${task.base_branch ? ` (base: ${task.base_branch})` : ""}`
+                )}
+              </Meta>
+            </MetaGroup>
+
+          </div>
+        </aside>
       </div>
     </div>
   );

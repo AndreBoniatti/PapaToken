@@ -362,6 +362,21 @@ describe("diagnóstico de entrega", () => {
   });
 });
 
+describe("abrir pasta no explorador", () => {
+  it("exige path e responde 404 para pasta inexistente", async () => {
+    const noPath = await app.inject({ method: "POST", url: "/api/fs/open", payload: {} });
+    expect(noPath.statusCode).toBe(400);
+
+    const missing = await app.inject({
+      method: "POST",
+      url: "/api/fs/open",
+      payload: { path: "C:\\nao\\existe\\papatoken-abrir" },
+    });
+    expect(missing.statusCode).toBe(404);
+    expect(missing.json().error).toContain("não existe");
+  });
+});
+
 describe("rotas de configurações", () => {
   it("entrega os padrões", async () => {
     const res = await app.inject({ method: "GET", url: "/api/settings" });

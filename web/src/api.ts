@@ -200,6 +200,9 @@ export const api = {
   browse: (path?: string) =>
     request<BrowseResult>(`/api/fs/browse${path ? `?path=${encodeURIComponent(path)}` : ""}`),
   recentDirs: () => request<{ dirs: string[] }>("/api/fs/recent-dirs"),
+  // abre a pasta no gerenciador de arquivos da máquina do servidor (app local)
+  openDir: (path: string) =>
+    request<{ ok: boolean }>("/api/fs/open", { method: "POST", body: JSON.stringify({ path }) }),
   gitBranches: (path: string) =>
     request<{ repo: boolean; branches: string[] }>(
       `/api/git/branches?path=${encodeURIComponent(path)}`
