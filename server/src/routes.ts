@@ -513,7 +513,7 @@ export async function registerRoutes(app: FastifyInstance) {
 
   // ---- estatísticas de custo/consumo ----
   app.get("/api/stats", async () => {
-    const agg = (where: string) =>
+    const agg = (conds: string[]) =>
       db
         .prepare(
           `SELECT
@@ -521,12 +521,19 @@ export async function registerRoutes(app: FastifyInstance) {
              COALESCE(SUM(cost_usd), 0) AS cost_usd,
              COALESCE(SUM(tokens_in), 0) AS tokens_in,
              COALESCE(SUM(tokens_out), 0) AS tokens_out
-           FROM tasks ${where}`
+           FROM tasks ${conds.length > 0 ? `WHERE ${conds.join(" AND ")}` : ""}`
         )
         .get();
+    // o agregado do período inclui tarefas com executed_by nulo (nunca executadas
+    // ou anteriores ao registro do provider); por isso claude + codex ≤ total
+    const period = (conds: string[]) => ({
+      ...(agg(conds) as Record<string, number>),
+      claude: agg([...conds, "executed_by = 'claude'"]),
+      codex: agg([...conds, "executed_by = 'codex'"]),
+    });
     return {
-      month: agg("WHERE finished_at >= strftime('%Y-%m-01', 'now')"),
-      total: agg(""),
+      month: period(["finished_at >= strftime('%Y-%m-01', 'now')"]),
+      total: period([]),
     };
   });
 

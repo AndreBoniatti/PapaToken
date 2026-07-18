@@ -6,6 +6,7 @@ import {
   onServerEvent,
   type Stats,
   type StatsAgg,
+  type StatsPeriod,
   type SubscriptionUsage,
   type UsageResponse,
   type UsageWindow,
@@ -79,17 +80,26 @@ function SubscriptionCard({ sub }: { sub: SubscriptionUsage }) {
   );
 }
 
-function HarvestStat({ label, agg }: { label: string; agg: StatsAgg }) {
+function ProviderLine({ name, agg, hasCost }: { name: string; agg: StatsAgg; hasCost: boolean }) {
+  return (
+    <div className="muted" style={{ fontSize: "0.8rem" }}>
+      <strong>{name}</strong>:{" "}
+      {hasCost ? `${fmtCost(agg.cost_usd)} · ` : ""}
+      {agg.tasks_done} tarefa(s) · {fmtTokens(agg.tokens_in + agg.tokens_out)} tokens
+      {!hasCost && " · custo não exposto"}
+    </div>
+  );
+}
+
+function HarvestStat({ label, agg }: { label: string; agg: StatsPeriod }) {
   return (
     <div>
       <span className="muted">{label}</span>
       <div style={{ fontSize: "1.5rem", fontWeight: 700, margin: "2px 0" }}>
         {fmtCost(agg.cost_usd)}
       </div>
-      <span className="muted" style={{ fontSize: "0.8rem" }}>
-        {agg.tasks_done} tarefa(s) concluída(s) ·{" "}
-        {fmtTokens(agg.tokens_in + agg.tokens_out)} tokens
-      </span>
+      <ProviderLine name="Claude" agg={agg.claude} hasCost />
+      <ProviderLine name="Codex" agg={agg.codex} hasCost={false} />
     </div>
   );
 }
@@ -154,7 +164,7 @@ export default function Dashboard() {
           <div className="card-head">
             <span className="card-title">🌾 Valor colhido</span>
             <span className="muted" style={{ fontSize: "0.78rem" }}>
-              custo de API equivalente das tarefas executadas (Claude; Codex não expõe)
+              custo de API equivalente das tarefas executadas
             </span>
           </div>
           <div style={{ display: "flex", gap: 48, flexWrap: "wrap" }}>

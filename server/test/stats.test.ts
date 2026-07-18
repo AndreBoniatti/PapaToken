@@ -64,7 +64,7 @@ describe("GET /api/stats", () => {
     await app.close();
   });
 
-  it("agrega custo/tokens no mês e no total", async () => {
+  it("agrega custo/tokens no mês e no total, com quebra por provider", async () => {
     const create = async (title: string) =>
       (
         await app.inject({
@@ -75,20 +75,36 @@ describe("GET /api/stats", () => {
       ).json();
     const recente = await create("stats recente");
     const antiga = await create("stats antiga");
+    const orfa = await create("stats sem provider");
 
     db.prepare(
-      "UPDATE tasks SET status = 'done', finished_at = datetime('now'), cost_usd = 0.02, tokens_in = 1000, tokens_out = 200 WHERE id = ?"
+      "UPDATE tasks SET status = 'done', finished_at = datetime('now'), executed_by = 'claude', cost_usd = 0.02, tokens_in = 1000, tokens_out = 200 WHERE id = ?"
     ).run(recente.id);
+    // Codex não expõe custo: fica 0, com o total de tokens em tokens_out
     db.prepare(
-      "UPDATE tasks SET status = 'done', finished_at = '2026-01-15 10:00:00', cost_usd = 0.05, tokens_in = 3000, tokens_out = 700 WHERE id = ?"
+      "UPDATE tasks SET status = 'done', finished_at = '2026-01-15 10:00:00', executed_by = 'codex', cost_usd = 0, tokens_in = 0, tokens_out = 3700 WHERE id = ?"
     ).run(antiga.id);
+    db.prepare(
+      "UPDATE tasks SET status = 'done', finished_at = '2026-01-10 10:00:00', cost_usd = 0.05, tokens_in = 3000, tokens_out = 700 WHERE id = ?"
+    ).run(orfa.id);
 
     const stats = (await app.inject({ method: "GET", url: "/api/stats" })).json();
     expect(stats.month.tasks_done).toBe(1);
     expect(stats.month.cost_usd).toBeCloseTo(0.02, 5);
     expect(stats.month.tokens_in).toBe(1000);
-    expect(stats.total.tasks_done).toBe(2);
+    expect(stats.month.claude.tasks_done).toBe(1);
+    expect(stats.month.claude.cost_usd).toBeCloseTo(0.02, 5);
+    expect(stats.month.codex.tasks_done).toBe(0);
+
+    expect(stats.total.tasks_done).toBe(3);
     expect(stats.total.cost_usd).toBeCloseTo(0.07, 5);
-    expect(stats.total.tokens_out).toBe(900);
+    expect(stats.total.claude.tasks_done).toBe(1);
+    expect(stats.total.codex.tasks_done).toBe(1);
+    expect(stats.total.codex.cost_usd).toBe(0);
+    expect(stats.total.codex.tokens_out).toBe(3700);
+    // tarefa sem executed_by entra só no agregado geral (claude + codex < total)
+    expect(stats.total.claude.tasks_done + stats.total.codex.tasks_done).toBeLessThan(
+      stats.total.tasks_done
+    );
   });
 });

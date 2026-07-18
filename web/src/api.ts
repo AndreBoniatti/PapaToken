@@ -73,9 +73,16 @@ export interface StatsAgg {
   tokens_out: number;
 }
 
+/** agregado do período + quebra por provider (tarefas com executed_by nulo
+ *  entram só no agregado geral, então claude + codex ≤ total) */
+export interface StatsPeriod extends StatsAgg {
+  claude: StatsAgg;
+  codex: StatsAgg;
+}
+
 export interface Stats {
-  month: StatsAgg;
-  total: StatsAgg;
+  month: StatsPeriod;
+  total: StatsPeriod;
 }
 
 export function fmtCost(v: number | null | undefined): string {
