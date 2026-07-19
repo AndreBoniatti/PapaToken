@@ -15,6 +15,7 @@ import {
   type Task,
   type TaskRun,
 } from "../api";
+import ConfirmDialog from "../components/ConfirmDialog";
 import FolderPicker from "../components/FolderPicker";
 
 const RUN_TYPE_LABEL: Record<TaskRun["run_type"], string> = {
@@ -256,6 +257,7 @@ export default function TaskDetail() {
   const [runs, setRuns] = useState<TaskRun[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [showMove, setShowMove] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [runProvider, setRunProvider] = useState<string>("");
   const [preview, setPreview] = useState<string | null>(null);
@@ -315,13 +317,14 @@ export default function TaskDetail() {
     }
   };
 
+  // exclusão efetiva — a confirmação acontece antes, no ConfirmDialog
   const remove = async () => {
-    if (!confirm(`Excluir a tarefa #${task.id} “${task.title}”?`)) return;
     try {
       await api.deleteTask(task.id);
       navigate("/tasks");
     } catch (e) {
       setError((e as Error).message);
+      setConfirmingDelete(false);
     }
   };
 
@@ -400,7 +403,7 @@ export default function TaskDetail() {
             )}
             {/* destrutivo isolado na extremidade oposta às ações rotineiras */}
             <span style={{ flex: 1 }} />
-            <button className="danger" onClick={() => void remove()}>
+            <button className="danger" onClick={() => setConfirmingDelete(true)}>
               Excluir
             </button>
           </>
@@ -412,6 +415,22 @@ export default function TaskDetail() {
 
       <div className="detail-layout">
         <div>
+
+      {confirmingDelete && (
+        <ConfirmDialog
+          title="Excluir tarefa"
+          confirmLabel="Excluir"
+          onConfirm={() => void remove()}
+          onClose={() => setConfirmingDelete(false)}
+        >
+          <p style={{ margin: "0 0 8px" }}>
+            Excluir a tarefa <strong>#{task.id} “{task.title}”</strong>?
+          </p>
+          <p className="muted" style={{ margin: 0, fontSize: "0.85rem" }}>
+            O histórico de execuções dela também será apagado.
+          </p>
+        </ConfirmDialog>
+      )}
 
       {showMove && (
         <FolderPicker

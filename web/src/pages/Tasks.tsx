@@ -11,6 +11,7 @@ import {
   type GitDoctor,
   type Task,
 } from "../api";
+import ConfirmDialog from "../components/ConfirmDialog";
 import DirectoryPicker from "../components/DirectoryPicker";
 import FolderPicker from "../components/FolderPicker";
 
@@ -153,6 +154,10 @@ export default function Tasks() {
   const [showAll, setShowAll] = useState(false);
   /** null = input de nova pasta fechado */
   const [newFolderName, setNewFolderName] = useState<string | null>(null);
+  /** pasta em edição inline de nome; null = nenhuma */
+  const [renamingFolder, setRenamingFolder] = useState<{ id: number; name: string } | null>(null);
+  /** pasta aguardando confirmação de exclusão; null = nenhuma */
+  const [deletingFolder, setDeletingFolder] = useState<Folder | null>(null);
   const [movingTask, setMovingTask] = useState<Task | null>(null);
   const [filter, setFilter] = useState<string>("all");
   const [showForm, setShowForm] = useState(false);
@@ -340,25 +345,29 @@ export default function Tasks() {
     }
   };
 
-  const renameFolder = async (f: Folder) => {
-    const name = prompt("Novo nome da pasta:", f.name)?.trim();
-    if (!name || name === f.name) return;
+  const saveRename = async () => {
+    if (!renamingFolder) return;
+    const name = renamingFolder.name.trim();
+    if (!name) return;
     try {
-      await api.updateFolder(f.id, { name });
+      await api.updateFolder(renamingFolder.id, { name });
+      setRenamingFolder(null);
+      setError(null);
       load();
     } catch (e) {
       setError((e as Error).message);
     }
   };
 
+  // exclusão efetiva — a confirmação acontece antes, no ConfirmDialog
   const removeFolder = async (f: Folder) => {
-    if (!confirm(`Excluir a pasta “${f.name}”? Tarefas e subpastas sobem para o nível acima.`))
-      return;
     try {
       await api.deleteFolder(f.id);
       load();
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      setDeletingFolder(null);
     }
   };
 
@@ -780,6 +789,22 @@ export default function Tasks() {
         </div>
       )}
 
+      {deletingFolder && (
+        <ConfirmDialog
+          title="Excluir pasta"
+          confirmLabel="Excluir"
+          onConfirm={() => void removeFolder(deletingFolder)}
+          onClose={() => setDeletingFolder(null)}
+        >
+          <p style={{ margin: "0 0 8px" }}>
+            Excluir a pasta <strong>“{deletingFolder.name}”</strong>?
+          </p>
+          <p className="muted" style={{ margin: 0, fontSize: "0.85rem" }}>
+            Nada é apagado junto: tarefas e subpastas sobem para o nível acima.
+          </p>
+        </ConfirmDialog>
+      )}
+
       {movingTask && (
         <FolderPicker
           folders={folders}
@@ -878,34 +903,68 @@ export default function Tasks() {
               <div
                 key={f.id}
                 className="folder-card"
-                title={`abrir “${f.name}”`}
-                onClick={() => setCurrentFolder(f.id)}
+                title={renamingFolder?.id === f.id ? undefined : `abrir “${f.name}”`}
+                style={renamingFolder?.id === f.id ? { cursor: "default" } : undefined}
+                onClick={() => renamingFolder?.id !== f.id && setCurrentFolder(f.id)}
               >
                 <span aria-hidden="true">📁</span>
-                <strong>{f.name}</strong>
-                <span className="muted" style={{ fontSize: "0.78rem" }}>
-                  {parts.length > 0 ? parts.join(" · ") : `${s?.total ?? 0} tarefa(s)`}
-                </span>
-                <span
-                  className="folder-card-actions"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <button
-                    type="button"
-                    title="renomear pasta"
-                    onClick={() => void renameFolder(f)}
+                {renamingFolder?.id === f.id ? (
+                  <span
+                    style={{ display: "inline-flex", gap: 4 }}
+                    onClick={(e) => e.stopPropagation()}
                   >
-                    {/* ︎ força o glifo de texto (herda a cor do tema) em vez do emoji */}
-                    {"✎︎"}
-                  </button>
-                  <button
-                    type="button"
-                    title="excluir pasta (o conteúdo sobe para o nível acima)"
-                    onClick={() => void removeFolder(f)}
-                  >
-                    ✕
-                  </button>
-                </span>
+                    <input
+                      autoFocus
+                      value={renamingFolder.name}
+                      style={{ padding: "4px 8px", width: 180 }}
+                      onChange={(e) => setRenamingFolder({ id: f.id, name: e.target.value })}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") void saveRename();
+                        if (e.key === "Escape") setRenamingFolder(null);
+                      }}
+                    />
+                    <button
+                      style={{ padding: "4px 10px", fontSize: "0.8rem" }}
+                      onClick={() => void saveRename()}
+                    >
+                      Salvar
+                    </button>
+                    <button
+                      style={{ padding: "4px 8px", fontSize: "0.8rem" }}
+                      title="cancelar"
+                      onClick={() => setRenamingFolder(null)}
+                    >
+                      ✕
+                    </button>
+                  </span>
+                ) : (
+                  <>
+                    <strong>{f.name}</strong>
+                    <span className="muted" style={{ fontSize: "0.78rem" }}>
+                      {parts.length > 0 ? parts.join(" · ") : `${s?.total ?? 0} tarefa(s)`}
+                    </span>
+                    <span
+                      className="folder-card-actions"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        type="button"
+                        title="renomear pasta"
+                        onClick={() => setRenamingFolder({ id: f.id, name: f.name })}
+                      >
+                        {/* ︎ força o glifo de texto (herda a cor do tema) em vez do emoji */}
+                        {"✎︎"}
+                      </button>
+                      <button
+                        type="button"
+                        title="excluir pasta (o conteúdo sobe para o nível acima)"
+                        onClick={() => setDeletingFolder(f)}
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  </>
+                )}
               </div>
             );
           })}
