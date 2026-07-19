@@ -92,6 +92,76 @@ h2 { font-size: 1.05rem; margin: 0 0 12px; }
 
 .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 18px; flex-wrap: wrap; }
 
+/* trilha de navegação das pastas lógicas de tarefas */
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 12px;
+  margin: 0 0 14px;
+  font-size: 0.88rem;
+}
+.breadcrumb .crumb {
+  color: var(--muted);
+  cursor: pointer;
+  padding: 2px 7px;
+  border-radius: 6px;
+}
+.breadcrumb .crumb:hover { background: var(--panel-2); color: var(--text); }
+.breadcrumb .crumb-current { font-weight: 600; padding: 2px 7px; }
+.breadcrumb .crumb-sep { color: var(--muted); user-select: none; }
+
+/* alternador de modo da listagem: navegar por pastas × fila completa */
+.seg-toggle {
+  display: inline-flex;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 2px;
+}
+.seg-toggle button {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+}
+.seg-toggle button:hover { color: var(--text); }
+/* fundo escuro + contorno amarelo: os emojis mantêm a cor natural */
+.seg-toggle button.active {
+  background: var(--panel-2);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* caminho da pasta ao lado do título na visão "ver todas as pastas" */
+.folder-link { color: var(--muted); cursor: pointer; }
+.folder-link:hover { color: var(--accent); }
+
+/* pastas do nível atual, listadas uma por linha acima da tabela de tarefas */
+.folder-grid { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+.folder-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 12px;
+  cursor: pointer;
+}
+.folder-card:hover { background: var(--panel-2); }
+/* ações encostadas na borda direita da linha */
+.folder-card-actions { display: flex; gap: 4px; margin-left: auto; }
+.folder-card-actions button { padding: 0 6px; font-size: 0.78rem; }
+
 button, select, input, textarea {
   background: var(--panel-2);
   color: var(--text);

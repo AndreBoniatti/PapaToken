@@ -40,6 +40,14 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_snapshots_sub_time
     ON usage_snapshots (subscription_id, captured_at);
 
+  -- pastas lógicas para organizar tarefas (só organização; não afeta o scheduler)
+  CREATE TABLE IF NOT EXISTS folders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    parent_id INTEGER REFERENCES folders(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
   CREATE TABLE IF NOT EXISTS tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
@@ -71,7 +79,9 @@ db.exec(`
     tokens_out INTEGER,
     kind TEXT NOT NULL DEFAULT 'exec' CHECK (kind IN ('exec','pr_review')),
     -- recorrência: minutos entre o fim de um ciclo e a volta à fila; NULL = não repete
-    recur_minutes INTEGER
+    recur_minutes INTEGER,
+    -- pasta lógica; NULL = raiz
+    folder_id INTEGER REFERENCES folders(id)
   );
 
   -- histórico 1:N de execuções de uma tarefa (a tarefa guarda só o agregado)
@@ -126,6 +136,8 @@ addColumn("tokens_out", "tokens_out INTEGER");
 addColumn("kind", "kind TEXT NOT NULL DEFAULT 'exec' CHECK (kind IN ('exec','pr_review'))");
 // recorrência: minutos entre o fim de um ciclo e a volta à fila; NULL = não repete
 addColumn("recur_minutes", "recur_minutes INTEGER");
+// pasta lógica da tarefa; NULL = raiz
+addColumn("folder_id", "folder_id INTEGER REFERENCES folders(id)");
 
 if (!hadRunsTable) {
   // backfill único: cada tarefa já executada vira o "run #1" do seu histórico

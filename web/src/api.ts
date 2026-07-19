@@ -64,6 +64,16 @@ export interface Task {
   cost_usd?: number | null;
   tokens_in?: number | null;
   tokens_out?: number | null;
+  /** pasta lógica; null = raiz */
+  folder_id?: number | null;
+}
+
+/** Pasta lógica de tarefas (só organização — não afeta o scheduler). */
+export interface Folder {
+  id: number;
+  name: string;
+  /** null = está na raiz */
+  parent_id: number | null;
 }
 
 export interface StatsAgg {
@@ -221,6 +231,17 @@ export const api = {
       `/api/verify/info?path=${encodeURIComponent(path)}`
     ),
   refreshUsage: () => request<{ ok: boolean }>("/api/usage/refresh", { method: "POST" }),
+  folders: () => request<Folder[]>("/api/folders"),
+  createFolder: (name: string, parentId: number | null) =>
+    request<Folder>("/api/folders", {
+      method: "POST",
+      body: JSON.stringify({ name, parent_id: parentId }),
+    }),
+  updateFolder: (id: number, f: { name?: string; parent_id?: number | null }) =>
+    request<Folder>(`/api/folders/${id}`, { method: "PATCH", body: JSON.stringify(f) }),
+  // o conteúdo (tarefas e subpastas) sobe para a pasta pai
+  deleteFolder: (id: number) =>
+    request<{ ok: boolean }>(`/api/folders/${id}`, { method: "DELETE" }),
   tasks: () => request<Task[]>("/api/tasks"),
   task: (id: number | string) => request<Task>(`/api/tasks/${id}`),
   taskRuns: (id: number | string) => request<TaskRun[]>(`/api/tasks/${id}/runs`),

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   api,
@@ -7,10 +7,12 @@ import {
   priorityLabel,
   RECUR_OPTIONS,
   recurLabel,
+  type Folder,
   type GitDoctor,
   type Task,
 } from "../api";
 import DirectoryPicker from "../components/DirectoryPicker";
+import FolderPicker from "../components/FolderPicker";
 
 const emptyForm = {
   kind: "exec",
@@ -144,6 +146,14 @@ function PrReadiness({
 
 export default function Tasks() {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [folders, setFolders] = useState<Folder[]>([]);
+  /** pasta aberta na navegação; null = raiz */
+  const [currentFolder, setCurrentFolder] = useState<number | null>(null);
+  /** visão global: todas as tarefas de todas as pastas (a fila como o scheduler vê) */
+  const [showAll, setShowAll] = useState(false);
+  /** null = input de nova pasta fechado */
+  const [newFolderName, setNewFolderName] = useState<string | null>(null);
+  const [movingTask, setMovingTask] = useState<Task | null>(null);
   const [filter, setFilter] = useState<string>("all");
   const [showForm, setShowForm] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
@@ -238,6 +248,7 @@ export default function Tasks() {
 
   const load = useCallback(() => {
     api.tasks().then(setTasks).catch((e) => setError(e.message));
+    api.folders().then(setFolders).catch(() => setFolders([]));
   }, []);
 
   useEffect(() => {
@@ -248,7 +259,108 @@ export default function Tasks() {
     return off;
   }, [load]);
 
-  const visible = filter === "all" ? tasks : tasks.filter((t) => t.status === filter);
+  // pasta aberta foi excluída (ou nunca existiu) → volta para a raiz
+  useEffect(() => {
+    if (currentFolder !== null && !folders.some((f) => f.id === currentFolder)) {
+      setCurrentFolder(null);
+    }
+  }, [folders, currentFolder]);
+
+  const folderById = useMemo(() => new Map(folders.map((f) => [f.id, f])), [folders]);
+
+  /** caminho legível ("Pasta A / Sub B"); null para tarefas na raiz */
+  const folderPath = useCallback(
+    (id: number | null | undefined): string | null => {
+      if (id == null) return null;
+      const parts: string[] = [];
+      let cur: number | null = id;
+      while (cur !== null) {
+        const f = folderById.get(cur);
+        if (!f) break;
+        parts.unshift(f.name);
+        cur = f.parent_id;
+      }
+      return parts.join(" / ") || null;
+    },
+    [folderById]
+  );
+
+  // caminho da raiz até a pasta aberta (breadcrumb)
+  const trail = useMemo(() => {
+    const list: Folder[] = [];
+    let cur = currentFolder;
+    while (cur !== null) {
+      const f = folderById.get(cur);
+      if (!f) break;
+      list.unshift(f);
+      cur = f.parent_id;
+    }
+    return list;
+  }, [currentFolder, folderById]);
+
+  const childFolders = useMemo(
+    () => folders.filter((f) => f.parent_id === currentFolder),
+    [folders, currentFolder]
+  );
+
+  // contagens por pasta somando a subárvore — dá para ver de fora se algo roda dentro
+  const folderStats = useMemo(() => {
+    const collect = (id: number): number[] => [
+      id,
+      ...folders.filter((f) => f.parent_id === id).flatMap((f) => collect(f.id)),
+    ];
+    const stats = new Map<number, { total: number; pending: number; running: number }>();
+    for (const f of folders) {
+      const ids = new Set(collect(f.id));
+      const inside = tasks.filter((t) => t.folder_id != null && ids.has(t.folder_id));
+      stats.set(f.id, {
+        total: inside.length,
+        pending: inside.filter((t) => t.status === "pending").length,
+        running: inside.filter((t) => t.status === "running").length,
+      });
+    }
+    return stats;
+  }, [folders, tasks]);
+
+  const inScope = showAll
+    ? tasks
+    : tasks.filter((t) => (t.folder_id ?? null) === currentFolder);
+  const visible = filter === "all" ? inScope : inScope.filter((t) => t.status === filter);
+
+  const createFolder = async () => {
+    const name = (newFolderName ?? "").trim();
+    if (!name) return;
+    try {
+      await api.createFolder(name, currentFolder);
+      setNewFolderName(null);
+      setError(null);
+      load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  const renameFolder = async (f: Folder) => {
+    const name = prompt("Novo nome da pasta:", f.name)?.trim();
+    if (!name || name === f.name) return;
+    try {
+      await api.updateFolder(f.id, { name });
+      load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  const removeFolder = async (f: Folder) => {
+    if (!confirm(`Excluir a pasta “${f.name}”? Tarefas e subpastas sobem para o nível acima.`))
+      return;
+    try {
+      await api.deleteFolder(f.id);
+      load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
 
   // resumos exibidos nas seções recolhidas do formulário
   const providerLabel: Record<string, string> = {
@@ -298,6 +410,8 @@ export default function Tasks() {
       const created = await api.createTask({
         ...form,
         priority: Number(form.priority),
+        // a tarefa nasce na pasta aberta na navegação
+        folder_id: currentFolder,
       } as Partial<Task>);
       if (files.length > 0) await api.uploadAttachments(created.id, files);
       setForm({ ...emptyForm });
@@ -317,6 +431,35 @@ export default function Tasks() {
         <button className="primary" onClick={() => setShowForm((v) => !v)}>
           {showForm ? "Cancelar" : "+ Nova tarefa"}
         </button>
+        {!showAll && (
+          <button onClick={() => setNewFolderName(newFolderName === null ? "" : null)}>
+            📁 Nova pasta
+          </button>
+        )}
+        <span style={{ flex: 1 }} />
+        {folders.length > 0 && (
+          <div className="seg-toggle">
+            <button
+              type="button"
+              className={showAll ? "" : "active"}
+              title="navegar pelas pastas"
+              onClick={() => setShowAll(false)}
+            >
+              📁 Pastas
+            </button>
+            <button
+              type="button"
+              className={showAll ? "active" : ""}
+              title="todas as tarefas numa lista só — a fila como o scheduler vê"
+              onClick={() => {
+                setShowAll(true);
+                setNewFolderName(null);
+              }}
+            >
+              ☰ Tudo
+            </button>
+          </div>
+        )}
         <select value={filter} onChange={(e) => setFilter(e.target.value)}>
           <option value="all">Todas</option>
           <option value="pending">Pendentes</option>
@@ -637,6 +780,23 @@ export default function Tasks() {
         </div>
       )}
 
+      {movingTask && (
+        <FolderPicker
+          folders={folders}
+          current={movingTask.folder_id ?? null}
+          onSelect={(fid) => {
+            void api
+              .updateTask(movingTask.id, { folder_id: fid } as Partial<Task>)
+              .then(() => {
+                setMovingTask(null);
+                load();
+              })
+              .catch((e) => setError((e as Error).message));
+          }}
+          onClose={() => setMovingTask(null)}
+        />
+      )}
+
       {showPicker && (
         <DirectoryPicker
           initial={form.cwd}
@@ -646,6 +806,110 @@ export default function Tasks() {
           }}
           onClose={() => setShowPicker(false)}
         />
+      )}
+
+      {!showAll && (folders.length > 0 || currentFolder !== null) && (
+        <div className="breadcrumb">
+          {currentFolder === null ? (
+            <span className="crumb-current" title="raiz">
+              🏠
+            </span>
+          ) : (
+            <span className="crumb" title="voltar à raiz" onClick={() => setCurrentFolder(null)}>
+              🏠
+            </span>
+          )}
+          {trail.map((f, i) => (
+            <span
+              key={f.id}
+              style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
+            >
+              <span className="crumb-sep">›</span>
+              {i === trail.length - 1 ? (
+                <span className="crumb-current">📁 {f.name}</span>
+              ) : (
+                <span className="crumb" onClick={() => setCurrentFolder(f.id)}>
+                  {f.name}
+                </span>
+              )}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {!showAll && (childFolders.length > 0 || newFolderName !== null) && (
+        <div className="folder-grid">
+          {newFolderName !== null && (
+            <div className="folder-card" style={{ cursor: "default" }}>
+              <span aria-hidden="true">📁</span>
+              <input
+                autoFocus
+                value={newFolderName}
+                placeholder="nome da nova pasta"
+                style={{ padding: "4px 8px", width: 180 }}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void createFolder();
+                  if (e.key === "Escape") setNewFolderName(null);
+                }}
+              />
+              <button
+                style={{ padding: "4px 10px", fontSize: "0.8rem" }}
+                onClick={() => void createFolder()}
+              >
+                Criar
+              </button>
+              <button
+                style={{ padding: "4px 8px", fontSize: "0.8rem" }}
+                title="cancelar"
+                onClick={() => setNewFolderName(null)}
+              >
+                ✕
+              </button>
+            </div>
+          )}
+          {childFolders.map((f) => {
+            const s = folderStats.get(f.id);
+            const parts = [
+              s && s.running > 0 ? `${s.running} executando` : null,
+              s && s.pending > 0 ? `${s.pending} pendente(s)` : null,
+            ].filter(Boolean);
+            return (
+              <div
+                key={f.id}
+                className="folder-card"
+                title={`abrir “${f.name}”`}
+                onClick={() => setCurrentFolder(f.id)}
+              >
+                <span aria-hidden="true">📁</span>
+                <strong>{f.name}</strong>
+                <span className="muted" style={{ fontSize: "0.78rem" }}>
+                  {parts.length > 0 ? parts.join(" · ") : `${s?.total ?? 0} tarefa(s)`}
+                </span>
+                <span
+                  className="folder-card-actions"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    type="button"
+                    title="renomear pasta"
+                    onClick={() => void renameFolder(f)}
+                  >
+                    {/* ︎ força o glifo de texto (herda a cor do tema) em vez do emoji */}
+                    {"✎︎"}
+                  </button>
+                  <button
+                    type="button"
+                    title="excluir pasta (o conteúdo sobe para o nível acima)"
+                    onClick={() => void removeFolder(f)}
+                  >
+                    ✕
+                  </button>
+                </span>
+              </div>
+            );
+          })}
+        </div>
       )}
 
       <table>
@@ -672,6 +936,29 @@ export default function Tasks() {
                   <span title={`recorrente: ${recurLabel(t.recur_minutes)}`} style={{ marginLeft: 6 }}>
                     🔁
                   </span>
+                )}
+                {showAll && t.folder_id != null && (
+                  <span
+                    className="folder-link"
+                    style={{ marginLeft: 8, fontSize: "0.78rem" }}
+                    title="abrir esta pasta"
+                    onClick={() => {
+                      setShowAll(false);
+                      setCurrentFolder(t.folder_id!);
+                    }}
+                  >
+                    📁 {folderPath(t.folder_id)}
+                  </span>
+                )}
+                {t.status !== "running" && folders.length > 0 && (
+                  <button
+                    type="button"
+                    title="mover para outra pasta"
+                    style={{ marginLeft: 6, padding: "0 4px", fontSize: "0.75rem" }}
+                    onClick={() => setMovingTask(t)}
+                  >
+                    📂
+                  </button>
                 )}
               </td>
               {/* quem executou; senão, quem está designada ("any" = qualquer) */}
@@ -709,7 +996,13 @@ export default function Tasks() {
           {visible.length === 0 && (
             <tr>
               <td colSpan={7} className="muted">
-                Nenhuma tarefa {filter !== "all" ? `com status “${filter}”` : "cadastrada"}.
+                Nenhuma tarefa{" "}
+                {filter !== "all"
+                  ? `com status “${filter}”`
+                  : !showAll && currentFolder !== null
+                    ? "nesta pasta"
+                    : "cadastrada"}
+                .
               </td>
             </tr>
           )}

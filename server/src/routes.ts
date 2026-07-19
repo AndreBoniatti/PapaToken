@@ -177,13 +177,86 @@ export async function registerRoutes(app: FastifyInstance) {
       .all(`-${hours} hours`);
   });
 
+  // ---- pastas lógicas (só organização — não afetam o scheduler) ----
+  type FolderRow = { id: number; name: string; parent_id: number | null };
+  const getFolder = (id: number) =>
+    db.prepare("SELECT id, name, parent_id FROM folders WHERE id = ?").get(id) as
+      | FolderRow
+      | undefined;
+
+  // sobe do candidato a pai até a raiz; se passar por `id`, mover criaria ciclo
+  const wouldCycle = (id: number, newParentId: number | null): boolean => {
+    let cur = newParentId;
+    while (cur !== null) {
+      if (cur === id) return true;
+      cur = getFolder(cur)?.parent_id ?? null;
+    }
+    return false;
+  };
+
+  // lista flat (escala single-user); o front monta a árvore
+  app.get("/api/folders", async () => {
+    return db
+      .prepare("SELECT id, name, parent_id FROM folders ORDER BY name COLLATE NOCASE")
+      .all();
+  });
+
+  app.post("/api/folders", async (req, reply) => {
+    const body = (req.body ?? {}) as { name?: string; parent_id?: number | null };
+    const name = (body.name ?? "").trim();
+    if (!name) return reply.code(400).send({ error: "name é obrigatório" });
+    const parentId = body.parent_id ?? null;
+    if (parentId !== null && !getFolder(parentId)) {
+      return reply.code(400).send({ error: "pasta pai não existe" });
+    }
+    const r = db.prepare("INSERT INTO folders (name, parent_id) VALUES (?, ?)").run(name, parentId);
+    return getFolder(r.lastInsertRowid as number);
+  });
+
+  app.patch("/api/folders/:id", async (req, reply) => {
+    const id = Number((req.params as { id: string }).id);
+    if (!getFolder(id)) return reply.code(404).send({ error: "pasta não encontrada" });
+    const body = (req.body ?? {}) as { name?: string; parent_id?: number | null };
+    if (body.name === undefined && body.parent_id === undefined) {
+      return reply.code(400).send({ error: "nada para atualizar" });
+    }
+    if (body.name !== undefined) {
+      const name = body.name.trim();
+      if (!name) return reply.code(400).send({ error: "name não pode ser vazio" });
+      db.prepare("UPDATE folders SET name = ? WHERE id = ?").run(name, id);
+    }
+    if (body.parent_id !== undefined) {
+      const parentId = body.parent_id; // null = mover para a raiz
+      if (parentId !== null && !getFolder(parentId)) {
+        return reply.code(400).send({ error: "pasta de destino não existe" });
+      }
+      if (wouldCycle(id, parentId)) {
+        return reply.code(400).send({ error: "não é possível mover uma pasta para dentro dela mesma" });
+      }
+      db.prepare("UPDATE folders SET parent_id = ? WHERE id = ?").run(parentId, id);
+    }
+    return getFolder(id);
+  });
+
+  // excluir reparenta o conteúdo (subpastas e tarefas) para a pasta pai
+  app.delete("/api/folders/:id", async (req, reply) => {
+    const id = Number((req.params as { id: string }).id);
+    const folder = getFolder(id);
+    if (!folder) return reply.code(404).send({ error: "pasta não encontrada" });
+    db.prepare("UPDATE folders SET parent_id = ? WHERE parent_id = ?").run(folder.parent_id, id);
+    db.prepare("UPDATE tasks SET folder_id = ? WHERE folder_id = ?").run(folder.parent_id, id);
+    db.prepare("DELETE FROM folders WHERE id = ?").run(id);
+    return { ok: true };
+  });
+
   // ---- tasks ----
   app.get("/api/tasks", async () => {
     return db
       .prepare(
         `SELECT id, title, provider, cwd, priority, status, created_at, started_at,
                 finished_at, executed_by, exit_code, attempts, max_attempts,
-                deliver_mode, deliver_status, pr_url, cost_usd, kind
+                deliver_mode, deliver_status, pr_url, cost_usd, kind, recur_minutes,
+                folder_id
          FROM tasks ORDER BY
            CASE status WHEN 'running' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END,
            -- fila (running/pending): mesma ordem que o despacho usa (nextTask)
@@ -220,6 +293,7 @@ export async function registerRoutes(app: FastifyInstance) {
       kind?: string;
       pr_url?: string;
       recur_minutes?: number | string | null;
+      folder_id?: number | null;
     };
     const kind = body.kind === "pr_review" ? "pr_review" : "exec";
     // review de PR: o prompt são instruções extras ao revisor — opcional
@@ -255,11 +329,16 @@ export async function registerRoutes(app: FastifyInstance) {
         .send({ error: "entrega por PR exige diretório de trabalho (repositório git)" });
     }
     const verifyCmd = body.verify_cmd?.trim() || null;
+    const folderId = body.folder_id ?? null;
+    if (folderId !== null && !getFolder(folderId)) {
+      return reply.code(400).send({ error: "pasta não existe" });
+    }
     const result = db
       .prepare(
         `INSERT INTO tasks (title, prompt, provider, cwd, priority, max_attempts, model, effort,
-                            deliver_mode, base_branch, work_branch, verify_cmd, kind, pr_url, recur_minutes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                            deliver_mode, base_branch, work_branch, verify_cmd, kind, pr_url, recur_minutes,
+                            folder_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         body.title,
@@ -276,7 +355,8 @@ export async function registerRoutes(app: FastifyInstance) {
         verifyCmd,
         kind,
         kind === "pr_review" ? body.pr_url!.trim() : null,
-        body.recur_minutes ? Number(body.recur_minutes) : null
+        body.recur_minutes ? Number(body.recur_minutes) : null,
+        folderId
       );
     rememberVerifyCmd(cwd, verifyCmd);
     const id = result.lastInsertRowid as number;
@@ -301,7 +381,7 @@ export async function registerRoutes(app: FastifyInstance) {
     const allowed = [
       "title", "prompt", "provider", "cwd", "priority", "status", "max_attempts",
       "model", "effort", "deliver_mode", "base_branch", "work_branch", "verify_cmd",
-      "recur_minutes",
+      "recur_minutes", "folder_id",
     ];
     const updates = allowed.filter((k) => body[k] !== undefined);
     if (updates.length === 0) return reply.code(400).send({ error: "nada para atualizar" });
@@ -319,6 +399,12 @@ export async function registerRoutes(app: FastifyInstance) {
     if (body.verify_cmd === "") body.verify_cmd = null;
     if (body.recur_minutes === "" || body.recur_minutes === 0) body.recur_minutes = null;
     else if (body.recur_minutes != null) body.recur_minutes = Number(body.recur_minutes);
+    if (body.folder_id !== undefined && body.folder_id !== null) {
+      body.folder_id = Number(body.folder_id);
+      if (!getFolder(body.folder_id as number)) {
+        return reply.code(400).send({ error: "pasta não existe" });
+      }
+    }
     if (body.status !== undefined && !["pending", "blocked", "done", "failed"].includes(String(body.status))) {
       return reply.code(400).send({ error: "status inválido" });
     }

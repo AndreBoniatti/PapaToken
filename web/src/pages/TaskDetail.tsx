@@ -11,9 +11,11 @@ import {
   RECUR_OPTIONS,
   recurLabel,
   taskAttachments,
+  type Folder,
   type Task,
   type TaskRun,
 } from "../api";
+import FolderPicker from "../components/FolderPicker";
 
 const RUN_TYPE_LABEL: Record<TaskRun["run_type"], string> = {
   exec: "execução",
@@ -252,6 +254,8 @@ export default function TaskDetail() {
   const navigate = useNavigate();
   const [task, setTask] = useState<Task | null>(null);
   const [runs, setRuns] = useState<TaskRun[]>([]);
+  const [folders, setFolders] = useState<Folder[]>([]);
+  const [showMove, setShowMove] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [runProvider, setRunProvider] = useState<string>("");
   const [preview, setPreview] = useState<string | null>(null);
@@ -260,6 +264,7 @@ export default function TaskDetail() {
     if (!id) return;
     api.task(id).then(setTask).catch((e) => setError(e.message));
     api.taskRuns(id).then(setRuns).catch(() => setRuns([]));
+    api.folders().then(setFolders).catch(() => setFolders([]));
   }, [id]);
 
   useEffect(() => {
@@ -326,6 +331,21 @@ export default function TaskDetail() {
     any: "Qualquer",
   };
 
+  // caminho legível da pasta lógica da tarefa ("Pasta A / Sub B"); null = raiz
+  const folderPath = (() => {
+    if (task.folder_id == null) return null;
+    const byId = new Map(folders.map((f) => [f.id, f]));
+    const parts: string[] = [];
+    let cur: number | null = task.folder_id;
+    while (cur !== null) {
+      const f = byId.get(cur);
+      if (!f) break;
+      parts.unshift(f.name);
+      cur = f.parent_id;
+    }
+    return parts.join(" / ") || null;
+  })();
+
   const isImage = (name: string) => /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name);
   const attachmentUrl = (name: string) =>
     `/api/tasks/${task.id}/attachments/${encodeURIComponent(name)}`;
@@ -387,6 +407,23 @@ export default function TaskDetail() {
 
       <div className="detail-layout">
         <div>
+
+      {showMove && (
+        <FolderPicker
+          folders={folders}
+          current={task.folder_id ?? null}
+          onSelect={(fid) => {
+            void api
+              .updateTask(task.id, { folder_id: fid } as Partial<Task>)
+              .then(() => {
+                setShowMove(false);
+                load();
+              })
+              .catch((e) => setError((e as Error).message));
+          }}
+          onClose={() => setShowMove(false)}
+        />
+      )}
 
       {preview && (
         <div className="modal-overlay" onClick={() => setPreview(null)}>
@@ -533,6 +570,18 @@ export default function TaskDetail() {
               <Meta label="Prioridade">{priorityLabel(task.priority)}</Meta>
               <Meta label="Tentativas">
                 {task.attempts}/{task.max_attempts}
+              </Meta>
+              <Meta label="Pasta" wide>
+                📁 {folderPath ?? "Raiz"}{" "}
+                {task.status !== "running" && (
+                  <button
+                    type="button"
+                    style={{ padding: "0 6px", fontSize: "0.78rem" }}
+                    onClick={() => setShowMove(true)}
+                  >
+                    mover…
+                  </button>
+                )}
               </Meta>
               <Meta label="Repetição" wide>
                 <select
