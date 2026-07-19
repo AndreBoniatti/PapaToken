@@ -368,14 +368,17 @@ export default function TaskDetail() {
       <div className="toolbar" style={{ marginBottom: 14 }}>
         {task.status !== "running" ? (
           <>
-            <select value={runProvider} onChange={(e) => setRunProvider(e.target.value)}>
-              <option value="">IA da tarefa</option>
-              <option value="claude">Forçar Claude</option>
-              <option value="codex">Forçar Codex</option>
-            </select>
-            <button className="primary" onClick={() => void run()}>
-              ▶ Executar agora
-            </button>
+            {/* select e botão formam uma ação só: rodar com a IA escolhida */}
+            <span style={{ display: "inline-flex", gap: 4 }}>
+              <select value={runProvider} onChange={(e) => setRunProvider(e.target.value)}>
+                <option value="">IA da tarefa</option>
+                <option value="claude">Forçar Claude</option>
+                <option value="codex">Forçar Codex</option>
+              </select>
+              <button className="primary" onClick={() => void run()}>
+                ▶ Executar agora
+              </button>
+            </span>
             {task.deliver_mode === "pr" && task.pr_url && (
               <button
                 onClick={() => void review()}
@@ -395,6 +398,8 @@ export default function TaskDetail() {
             {task.status !== "pending" && (
               <button onClick={() => void requeue()}>↩ Devolver à fila</button>
             )}
+            {/* destrutivo isolado na extremidade oposta às ações rotineiras */}
+            <span style={{ flex: 1 }} />
             <button className="danger" onClick={() => void remove()}>
               Excluir
             </button>

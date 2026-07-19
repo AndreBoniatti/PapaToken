@@ -145,6 +145,16 @@ h2 { font-size: 1.05rem; margin: 0 0 12px; }
 .folder-link { color: var(--muted); cursor: pointer; }
 .folder-link:hover { color: var(--accent); }
 
+/* mover tarefa de pasta: alinhado à direita da célula, visível só no hover da linha */
+.row-move {
+  margin-left: auto;
+  padding: 0 5px;
+  font-size: 0.75rem;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+tr:hover .row-move { opacity: 1; }
+
 /* pastas do nível atual, listadas uma por linha acima da tabela de tarefas */
 .folder-grid { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
 .folder-card {

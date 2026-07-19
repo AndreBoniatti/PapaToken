@@ -929,37 +929,37 @@ export default function Tasks() {
             <tr key={t.id}>
               <td>{t.id}</td>
               <td>
-                <Link to={`/tasks/${t.id}`} style={{ color: "var(--accent)" }}>
-                  {t.title}
-                </Link>
-                {(t.recur_minutes ?? 0) > 0 && (
-                  <span title={`recorrente: ${recurLabel(t.recur_minutes)}`} style={{ marginLeft: 6 }}>
-                    🔁
-                  </span>
-                )}
-                {showAll && t.folder_id != null && (
-                  <span
-                    className="folder-link"
-                    style={{ marginLeft: 8, fontSize: "0.78rem" }}
-                    title="abrir esta pasta"
-                    onClick={() => {
-                      setShowAll(false);
-                      setCurrentFolder(t.folder_id!);
-                    }}
-                  >
-                    📁 {folderPath(t.folder_id)}
-                  </span>
-                )}
-                {t.status !== "running" && folders.length > 0 && (
-                  <button
-                    type="button"
-                    title="mover para outra pasta"
-                    style={{ marginLeft: 6, padding: "0 4px", fontSize: "0.75rem" }}
-                    onClick={() => setMovingTask(t)}
-                  >
-                    📂
-                  </button>
-                )}
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <Link to={`/tasks/${t.id}`} style={{ color: "var(--accent)" }}>
+                    {t.title}
+                  </Link>
+                  {(t.recur_minutes ?? 0) > 0 && (
+                    <span title={`recorrente: ${recurLabel(t.recur_minutes)}`}>🔁</span>
+                  )}
+                  {showAll && t.folder_id != null && (
+                    <span
+                      className="folder-link"
+                      style={{ fontSize: "0.78rem" }}
+                      title="abrir esta pasta"
+                      onClick={() => {
+                        setShowAll(false);
+                        setCurrentFolder(t.folder_id!);
+                      }}
+                    >
+                      📁 {folderPath(t.folder_id)}
+                    </span>
+                  )}
+                  {t.status !== "running" && folders.length > 0 && (
+                    <button
+                      type="button"
+                      className="row-move"
+                      title="mover para outra pasta"
+                      onClick={() => setMovingTask(t)}
+                    >
+                      📂
+                    </button>
+                  )}
+                </div>
               </td>
               {/* quem executou; senão, quem está designada ("any" = qualquer) */}
               <td
